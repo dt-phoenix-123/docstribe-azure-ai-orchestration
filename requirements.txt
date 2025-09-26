@@ -15,3 +15,4 @@ langchain-groq
 langchain-mistralai
 langchain-deepseek
 beautifulsoup4
+redis

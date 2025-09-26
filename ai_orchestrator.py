@@ -48,6 +48,11 @@ try:  # OpenAI client
 except ImportError as exc:  # pragma: no cover - surfaced clearly at runtime
     raise ImportError("openai package is required for Docstribe Orchestrator") from exc
 
+try:  # optional redis usage for queue publishing
+    import redis  # type: ignore
+except ImportError:  # pragma: no cover - runtime guard
+    redis = None  # type: ignore
+
 try:  # Domain-specific helpers
     from docstribe_summarizer import (
         summarize_diagnostics,
@@ -375,14 +380,42 @@ class LocalJSONLStore:
 
 
 class LocalPublisher:
-    """Minimal Pub/Sub-like publisher writing payloads to JSONL topics."""
+    """Publisher that prefers Redis queues and falls back to JSONL."""
 
     def __init__(self, base_path: Path):
         self.jsonl_store = LocalJSONLStore(base_path)
+        redis_url = os.getenv("AUTOMATION_REDIS_URL")
+        self.redis_client = None
+        if redis is not None and redis_url:
+            try:
+                self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
+            except Exception:  # pragma: no cover - redis unreachable
+                self.redis_client = None
+        self.topic_queue_map: Dict[str, str] = {}
+
+    def configure_topic(self, topic: str, queue_name: str) -> None:
+        self.topic_queue_map[topic] = queue_name
 
     def publish(self, topic: str, data: bytes) -> str:
         message_id = uuid.uuid4().hex
         payload = {"message_id": message_id, "topic": topic, "data": data.decode("utf-8")}
+        queue_name = self.topic_queue_map.get(topic)
+        if self.redis_client is not None and queue_name:
+            try:
+                try:
+                    job = json.loads(payload["data"])
+                except json.JSONDecodeError:
+                    job = payload
+                self.redis_client.rpush(queue_name, json.dumps(job))
+                logger.debug(
+                    "Queued message %s onto redis queue %s (payload keys=%s)",
+                    message_id,
+                    queue_name,
+                    list(job.keys()),
+                )
+                return message_id
+            except Exception:  # pragma: no cover - fall back to file
+                logger.exception("Redis publish failed for queue %s; writing to file instead", queue_name)
         filename = f"{topic}.jsonl"
         self.jsonl_store.append(filename, payload)
         return message_id
@@ -492,6 +525,11 @@ class DocstribeOrchestrator:
             "topic_id": os.getenv("DOCSTRIBE_TOPIC_ID", "pdcm-payload"),
             "opd_topic_id": os.getenv("DOCSTRIBE_OPD_TOPIC_ID", "opd-payload"),
         }
+
+        opd_queue = os.getenv("AUTOMATION_INCOMING_QUEUE", "opd:incoming")
+        pdcm_queue = os.getenv("AUTOMATION_PDCM_QUEUE", "pdcm:incoming")
+        self.publisher.configure_topic(self.project_settings["opd_topic_id"], opd_queue)
+        self.publisher.configure_topic(self.project_settings["topic_id"], pdcm_queue)
 
         if self.mongo_database is not None:
             logger.info(

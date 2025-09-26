@@ -168,7 +168,48 @@ The `opd_pydantic_validator.py` module powers OPD response validation. It honour
 back to a no-op if MongoDB is unavailable. Validation failures are printed to the
 console for debugging.
 
-x## Troubleshooting
+## Automation Workflow (Redis-backed)
+
+The `automation/` package provides a configurable orchestrator that automates the
+full OPD batch lifecycle:
+
+1. **Queue intake**: enqueue payloads on the Redis list `opd:incoming` to simulate
+   `/process_op` requests.
+2. **Incoming worker**: calls `/process_opd_message` for each queued job.
+3. **Pending collector**: polls MongoDB for `status="pending"` and calls
+   `/collect_opd_pending_requests` when documents are available.
+4. **Batch submitter**: monitors the JSONL file and triggers `/upload_batch` once
+   the configured threshold is reached.
+5. **Batch poller**: checks `/check_batch_status` every `AUTOMATION_POLL_INTERVAL`
+   seconds; once completed, it queues the output file for retrieval.
+6. **Result worker**: invokes `/retrieve_results` for completed batches.
+
+### Enabling the orchestrator
+
+```
+export AUTOMATION_ENABLED=true
+export AUTOMATION_BASE_URL=http://localhost:8080
+export AUTOMATION_REDIS_URL=redis://localhost:6379/0
+export AUTOMATION_BATCH_THRESHOLD=100
+export AUTOMATION_PDCM_QUEUE=pdcm:incoming
+python3 -m automation.orchestrator
+```
+
+To enqueue jobs programmatically:
+
+```python
+from automation.redis_queue import RedisQueue
+
+queue = RedisQueue("opd:incoming")
+queue.push({
+    "prompt_code": "openai_gen_op_1",
+    "data_payload": {...}
+})
+```
+
+All workers run as daemon threads. Stop them with `Ctrl+C`.
+
+## Troubleshooting
 
 - Status remains `pending` after `/collect_opd_pending_requests`: ensure the
   payload wraps each record under `responses` and the `patient_details.patient_id`

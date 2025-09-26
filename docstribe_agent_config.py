@@ -99,6 +99,7 @@ OPD_STRING_UNIVERSE: List[str] = _load_json_list(OPD_STRING_UNIVERSE_FILE) or PR
 # Environment-driven secrets and service endpoints
 # ---------------------------------------------------------------------------
 
+DOCSTRIBE_MONGODB_URI = os.getenv("DOCSTRIBE_MONGODB_URI", "")
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY", "")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
@@ -181,6 +182,7 @@ __all__ = [
     "OPENAI_GPT4O_MODEL",
     "OPENAI_GPT4O_MINI",
     "OPENAI_GPTO3_MODEL",
+    "DOCSTRIBE_MONGODB_URI",
     "load_prompts",
 ]
 
