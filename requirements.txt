@@ -1,0 +1,17 @@
+flask
+requests
+python-dotenv
+PyYAML
+pymongo
+openai
+pandas
+python-dateutil
+fuzzywuzzy
+python-Levenshtein
+crewai
+langchain-core
+langchain-openai
+langchain-groq
+langchain-mistralai
+langchain-deepseek
+beautifulsoup4

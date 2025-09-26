@@ -1,0 +1,745 @@
+templates:
+  summarize_format: |
+    Given the patient details, please classify them into the below cohort.
+    {
+      "medical_history": [
+        {"tag": "Past Medical Conditions", "description": ["<list of elements related to past history of the patient>"]}
+      ],
+      "key_findings": [
+        {"tag": "Key Findings", "description": ["<list of key findings reported in the summary>"]}
+      ],
+      "chief_complaints": [
+        {"tag": "Chief Complaints", "description": ["<list of chief complaints reported by the patient during admission>"]}
+      ],
+      "procedures_done": [
+        {
+          "tag": "Procedure Details",
+          "procedure": "<procedure_name>",
+          "findings": "<procedure findings>"
+        }
+      ],
+      "primary_procedure_name":<name of the primary procedure in easy terms>
+      "follow_up": [
+        {
+          "tag": "Follow-up Instructions",
+          "description": ["<list of follow-up advice in string format from the discharge date>"],
+          "follow_up_date":<date calculated from the discharge date>
+        }
+        <only show it if the follow-up is explicitly mentioned>
+      ],
+      "medications": [
+        {"tag": "Medications", "description": ["<list of medications with their dosage in string format>"]}
+      ],
+      "death_flag":<"true" if the patient has expired, "false" if the patient has been discharged>
+      "cohorts": {
+        "primary": "<primary disease name>",
+        "secondary": ["<list of diseases as complications>"]
+      },
+      "critical_medications":[
+        {"medication_name":<name of the medicine that is super critical and it's purpose>,"dosage":<dosage of the given medication>, "side_effect":<possible side effects of that medicine>}
+      ],
+      "actionables": [
+        {"tag": "Immediate Actions", "description": ["<list of immediate actions required based on the patient’s condition>"]},
+        {"tag": "Long-term Care", "description": ["<list of long-term care recommendations>"]}
+      ]
+    }
+  openai_gen_ip2_json_format: |
+    {
+      "care_plan": {
+        "summary": "",
+        "consultations": [],
+        "monitoring_plan": [],
+        "lifestyle": [],
+        "red_flags": []
+      }
+    }
+  openai_gen_ip2_json_format_v2: |
+    {
+        "revenue_potential_score":{"score":<revenue potential score is a score on 1 to 10 based on the criticality and LTV of the patient. If patient died, give a score of 0.","evidence":[<evidence for criticality>,<evidence for LTV>]},
+        "next_visit_action": {
+                        "visit_date":<next visit calendar date from current date in %d-%b-%Y format>,
+                        "purpose_of_visit":{
+                        "consultations":<consultation needed as string with the doctor/ department for continuum care of procedure/surgery/cure performed>,
+                        "monitoring_tests":[<list of screenings adressing the most urgent health risk and continuum of care>],
+                        "reason":<reason for the visit needed>
+                        },
+              "secondary_complications":[{"disease_name":<highly likely secondary complications related to disease/surgery/cure being done >, "screenings":[<list of screenings to rule out or confirm the disease>], "likeliness":<likeliness of the disease in high/medium/low>}, "department":<department for the secondary complication>]
+              },
+        "chronic_condition":<review the discharge summary and lab tests and provide a chronic category in one word, identifying any significant patterns or suggesting potential categorizations based on common thresholds and medical guidelines for the following chronic conditions - [Diabetes, Cancer, Cardiovascular, Kidney Management, Other (if the primary concern goes out of the defined categories)]>
+         "simple_discharge_summarization":{
+            "medical_history":[<past medical conditions as per discharge summary explainable to a 5th grade student in pointers>],
+            "clinical_representation":[<clinical representation of the patient's case explainable to a 5th grade student in pointers>],
+            "impact_on_health":[<list of aspects that might worsen if the patient does not continue follow-up explainable to a 5th grade student in pointerscd>]
+        }
+    }
+  opd_output_json_format_medications: |
+    You need to create a care management plan for this patient for a care cordinator. You need to ensure the gap that has happened since last visit. Output the plan with following components strictly in the given json format:
+        {
+      "patient_health_condition": {
+        "current_condition": [
+          "<Simply explain patient’s major health condition in 3 pointers covering the clinical findings and current management of conditions. Please ensure that it is easily communicable to the patients in simple english language>"
+        ],
+        "upcoming_appointment": [
+          "<Simply explain what are the clinical aspects that will be monitored for the patient in their next appointment by the doctor in 3 pointers in simple english.>"
+        ],
+         "symptoms_monitoring":[
+               <ask 3 symptoms related to daily life activities in a simple conversational language, based on the patient's clinical conditions and the medications & any possible side effects>
+            ],
+        "impact_on_health": [
+          {
+            "<disease_name>": "<Explain the impact>"
+          }
+        ]
+      },
+
+       "clinical_condition": {
+       "risk_factors":[<array of elements that are risk concerns for the patient in 2-3 words that gives the clear snapshot of the patient’s existing conditions. Please write these in a way common person can understand.>],
+       "possible_symptoms":[
+            {
+                "condition": <condition as per given medication's threapy or its side effect>,
+                "evidence": [<medication_name: evidence of the condition in lay man terms>],
+                "severity": <`high`, `medium` , or `low` basis the severity of the condition>,
+                "symptoms" :[<list of possible symptoms in 2-3 words in a language that a common person can understand>]
+            }
+    ],
+
+    }
+      "differential_diagnoses": [
+        {
+          "disease_name": "<name_of_the_disease>",
+          "risk_score": <a number out of 10 based on the classification of the related diagnostic tests, age, gender and Indian demography>,
+          "evidence": "<evidence for the disease to occur>",
+          "symptoms": [
+            "<list of 3 super important symptoms associated with the disease>"
+          ],
+          "department": "<department name in which patient must consult with the doctor for the given disease>"
+        }
+      ],
+      "primary_goal": {
+        "visit_date": "<next necessary appointment due date according to the relevant clinical protocol in the format dd-mm-yyyy>",
+        "screenings": [
+          {
+            "screening_name": "<screening test name>",
+            "evidence": "<evidence of the disease to occur>"
+          }
+        ],
+        "consultations": [
+          {
+            "department": "<top 2 primary health concerned department names>"
+          }
+        ]
+      },
+      "chronic_condition": <"true" if the patient's clinical condition is chronic, "false" otherwise>
+      "secondary_complications": [{
+        "disease_name": "<necessary secondary clinical complications related to the patient’s clinical condition>",
+        "department_name": "<the department in which the patient must consult>",
+        "evidence": "<clinical evidence for the identified secondary clinical complication>"
+      }],
+      "further_management": {
+        "management_advice": "<`immediate IPD admission` or `medication management` as a string flag>",
+        "evidence": "<clinical evidence based on patient's health condition, age, demography and given the severity of the identified differential diagnosis>",
+      },
+        "risk_stratification": {
+          "overall_risk_score": <number out of 10>,
+          "risk_category": "<High/Medium/Low>"
+        }
+      },
+          "care_gaps_present": {
+            "doctor_care_gap_flag": <"true" if doctor has written about the follow up, which is before the {current_date}, "false" otherwise>,
+            "protocol_care_gap_flag":<"true" if there is a must have clinical follow up protocol not being completed by the patient as per the {procedure_name} clinical guidelines as of {current_date}, else "false">
+            "missed_follow_ups": [
+                {
+                    "follow_up_date": "<date at which the follow-up needs to be done>",
+                    "type":<`protocol_care_gap` or `doctor_care_gap` >,
+                    "evidence":<clear 1 liner clinical evidence for this follow up schedule>
+                }
+            ]
+        },
+
+            "primary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            },
+            "secondary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            }
+
+
+    }
+  opd_output_json_format_medications_v2: |
+    You need to create a care management plan for this patient for a care cordinator. You need to ensure the gap that has happened since last visit. Output the plan with following components strictly in the given json format:
+        {
+      "patient_health_condition": {
+        "current_condition": [
+          "<Simply explain patient's major health condition in 3 pointers covering the clinical findings and current management of conditions. Please ensure that it is easily communicable to the patients in simple english language>"
+        ],
+        "upcoming_appointment": [
+          "<Simply explain what are the clinical aspects that will be monitored for the patient in their next appointment by the doctor in 3 pointers in simple english.>"
+        ],
+         "symptoms_monitoring":[
+               <ask 3 symptoms related to daily life activities in a simple conversational language, based on the patient's clinical conditions and the medications & any possible side effects>
+            ],
+        "impact_on_health": [
+          {
+            "<disease_name>": "<Explain the impact>"
+          }
+        ]
+      },
+       "clinical_condition": {
+       "risk_factors":[<array of elements that are risk concerns for the patient in 2-3 words that gives the clear snapshot of the patient’s existing conditions. Please write these in a way common person can understand.>],
+       "possible_symptoms":[
+            {
+                "condition": <condition as per given medication's threapy or its side effect>,
+                "evidence": [<medication_name: evidence of the condition in lay man terms>],
+                "severity": <`high`, `medium` , or `low` basis the severity of the condition>,
+                "symptoms" :[<list of possible symptoms in 2-3 words in a language that a common person can understand>]
+            }
+    ],
+
+    }
+      "differential_diagnoses": [
+        {
+          "disease_name": "<name_of_the_disease>",
+          "risk_score": <a number out of 10 based on the classification of the related diagnostic tests, age, gender and Indian demography>,
+          "evidence": "<evidence for the disease to occur>",
+          "symptoms": [
+            "<list of 3 super important symptoms associated with the disease>"
+          ],
+          "department": "<department name in which patient must consult with the doctor for the given disease>"
+        }
+      ],
+      "primary_goal": {
+        "visit_date": "<next necessary appointment due date according to the relevant clinical protocol  in the format dd-mm-yyyy>",
+        "tasks": [
+          {
+            "task_type": "<lab-test/appointment/referral/radiology/ip-recommendation>",
+            "task_name": "<specific name of the task>",
+            "source": "<doctor_advised/guideline_led>",
+            "evidence": "<clinical evidence for this task>",
+            "due_date": "<recommended date in dd-mm-yyyy format as per the doctor advice/ guideline ( take the benchmark from the last visit date of the patient)>",
+            "department": "<department name (for appointment/referral tasks)>",
+            "specialist": "<specialist type (for appointment/referral tasks)>",
+            "body_part": "<body part (for radiology tasks/ ip-recommendation task)>",
+            "urgency": "<immediate/urgent/routine (for all tasks)>",
+            "criticality": "<critical/high/medium/low - only for guideline_led tasks, based on clinical importance and potential health impact if delayed>"
+            "revenue_potential": < a number depicting charges for the given task type as per Indian standard private hospitals>
+          }
+          <please share only critical and immediate level guideline_led tasks not routine ones>
+        ]
+      },
+      "secondary_complications": [{
+        "disease_name": "<necessary secondary clinical complications related to the patient's clinical condition>",
+        "department_name": "<the department in which the patient must consult>",
+        "evidence": "<clinical evidence for the identified secondary clinical complication>"
+      }],
+      "further_management": {
+        "management_advice": "<`immediate IPD admission` or `medication management` as a string flag>",
+        "evidence": "<clinical evidence based on patient's health condition, age, demography and given the severity of the identified differential diagnosis>",
+      },
+        "risk_stratification": {
+          "overall_risk_score": <number out of 10>,
+          "risk_category": "<Moderate/Rising Risk/High Risk/ Critical>"
+        }
+      },
+          "care_gaps_present": {
+            "doctor_care_gap_flag": <"true" if doctor has written about the follow up, which is before the {current_date}, "false" otherwise>,
+            "protocol_care_gap_flag":<"true" if there is a must have clinical follow up protocol not being completed by the patient as per the {procedure_name} clinical guidelines as of {current_date}, else "false">
+            "missed_follow_ups": [
+                {
+                    "follow_up_date": "<date at which the follow-up needs to be done>",
+                    "type":<`protocol_care_gap` or `doctor_care_gap` >,
+                    "evidence":<clear 1 liner clinical evidence for this follow up schedule>,
+                    "criticality": "<critical/high/medium/low - only for guideline_led tasks, based on clinical importance and potential health impact if delayed>"
+                }
+            ]
+        },
+        "chronic_flag":{
+        "has_chronic_disease":<true if there is a chronic disease, false otherwise>,
+        "chronic_evidence":"<one liner evidence of chronic>"
+        "has_multiple_chronic_disease":<true if there are more than one chronic disease>
+        },
+
+            "primary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            },
+            "secondary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            }
+
+
+    }
+  opd_output_json_format_v3: |
+    You need to create a care management plan for this patient for a care cordinator. You need to ensure the gap that has happened since last visit. Output the plan with following components strictly in the given json format:
+        {
+      "patient_health_condition": {
+        "current_condition": [
+          "<Simply explain patient’s major health condition in 3 pointers covering the clinical findings and current management of conditions. Please ensure that it is easily communicable to the patients in simple english language>"
+        ],
+        "upcoming_appointment": [
+          "<Simply explain what are the clinical aspects that will be monitored for the patient in their next appointment by the doctor in 3 pointers in simple english.>"
+        ],
+         "symptoms_monitoring":[
+               <ask 3 symptoms related to daily life activities in a simple conversational language, based on the patient's clinical conditions and the medications & any possible side effects>
+            ],
+        "impact_on_health": [
+          {
+            "<disease_name>": "<Explain the impact>"
+          }
+        ]
+      },
+      "differential_diagnoses": [
+        {
+          "disease_name": "<name_of_the_disease>",
+          "risk_score": <a number out of 10 based on the classification of the related diagnostic tests, age, gender and Indian demography>,
+          "evidence": "<evidence for the disease to occur>",
+          "symptoms": [
+            "<list of 3 super important symptoms associated with the disease>"
+          ],
+          "department": "<department name in which patient must consult with the doctor for the given disease>"
+        } <list top 3 differential diagnoses>
+      ],
+      "primary_goal": {
+        "visit_date": "<next necessary appointment due date according to the relevant clinical protocol in the format dd-mm-yyyy>",
+        "screenings": [
+          {
+            "screening_name": "<screening test name>",
+            "evidence": "<evidence of the disease to occur>"
+          }
+        ],
+        "consultations": [
+          {
+            "department": "<top 2 primary health concerned department names>"
+          }
+        ]
+      },
+      "secondary_complications": [{
+        "disease_name": "<necessary secondary clinical complications related to the patient’s clinical condition>",
+        "department_name": "<the department in which the patient must consult>",
+        "evidence": "<clinical evidence for the identified secondary clinical complication>"
+      }],
+      "further_management": {
+        "management_advice": "<`immediate IPD admission` or `medication management` as a string flag>",
+        "evidence": "<clinical evidence based on patient's health condition, age, demography and given the severity of the identified differential diagnosis>"
+      },
+        "risk_stratification": {
+          "overall_risk_score": <number out of 10>,
+          "risk_category": "<High/Medium/Low>"
+        }
+      },
+        "care_gaps_present": {
+            "doctor_care_gap_flag": <"true" if doctor has written about the follow up, which is before the {current_date}, "false" otherwise>,
+            "protocol_care_gap_flag":<"true" if there is a must have clinical follow up protocol not being completed by the patient as per the {procedure_name} clinical guidelines as of {current_date}, else "false">
+            "missed_follow_ups": [
+                {
+                    "follow_up_date": "<date at which the follow-up needs to be done>",
+                    "type":<`protocol_care_gap` or `doctor_care_gap` >,
+                    "evidence":<clear 1 liner clinical evidence for this follow up schedule>
+                }
+            ]
+        },
+
+            "primary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            },
+            "secondary_cohort":{
+                "<name_of_the_speciality>":{
+                "primary":<name of the primary disease>,
+                "secondary":<name of the secondary disease>
+                }
+            },
+
+            "clinical_condition": {
+       "risk_factors":[<array of elements that are risk concerns for the patient in 2-3 words that gives the clear snapshot of the patient’s existing conditions. Please write these in a way common person can understand.>],
+       "possible_symptoms":[
+            {
+                "condition": <condition as per given medication's threapy or its side effect>,
+                "evidence": [<medication_name: evidence of the condition in lay man terms>],
+                "severity": <`high`, `medium` , or `low` basis the severity of the condition>,
+                "symptoms" :[<list of possible symptoms in 2-3 words in a language that a common person can understand>]
+            }
+    ],
+       "admission_advised_section":{
+        "admission_advised":< true/ false - check the section care plan/advise and basis the note make this flag true if the note suggest something that needs to happen in inpatient setup>,
+        "admission_advised_evidence":<quote the section in 4-5 words>
+        }
+    }
+
+
+    }
+
+prompts:
+  opd_batch_v2:
+    system: |
+      {context}
+      {sys_cohort_prompt}
+    user: |
+      You need to create a care management plan for this patient for a care coordinator.
+      Provide the response strictly as JSON following this schema: {output_format}
+  opd_batch_legacy:
+    system: |
+      {context}
+      {sys_cohort_prompt}
+    user: |
+      As of {current_date}, produce an actionable care management plan for the patient
+      suitable for a care coordinator. The response must comply with this JSON schema:
+      {output_format}
+
+master_prompts:
+  sys_cohort_prompt: |
+        {
+          "Cardiology": {
+            "primary": ["Acute Coronary Syndrome", "Heart Failure", "Cardiac Arrhythmia", "Others - (Mention category name)"],
+            "secondary": ["Hypertension", "Hyperlipidemia", "Type 2 Diabetes Mellitus", "Others -  (Mention category name)"]
+          },
+          "Neurology": {
+            "primary": ["Ischemic Stroke", "Epilepsy", "Parkinson Disease", "Others - (Mention category name)"],
+            "secondary": ["Migraine", "Cerebral Small-Vessel Disease", "Dementia", "Others - (Mention category name)"]
+          },
+          "Gastroenterology": {
+            "primary":  [
+                "Cirrhosis",
+                "Inflammatory Bowel Disease",
+                "Acute Pancreatitis",
+                "Chronic Hepatitis C",
+                "Liver Cancer",
+                "Ulcerative Colitis",
+                "Crohn's Disease",
+                "Gallstones",
+                "Peptic Ulcer Disease",
+                "Others - (Mention category name)"
+              ],
+            "secondary": ["GERD",
+                "Hepatitis B",
+                "Portal Hypertension",
+                "Fatty Liver Disease (NAFLD)",
+                "Pancreatic Cancer",
+                "Celiac Disease",
+                "Lactose Intolerance",
+                "Diverticulitis",
+                "Esophageal Varices",
+                "Others - (Mention category name)"
+            ]
+          },
+          "Endocrinology": {
+            "primary": ["Type 2 Diabetes Mellitus", "Graves Disease", "Adrenal Insufficiency"],
+            "secondary": ["Obesity", "Dyslipidemia", "Osteoporosis", "Others - (Mention category name)"]
+          },
+
+          "Nephrology": {
+            "primary": ["Chronic Kidney Disease", "Acute Kidney Injury", "Nephrotic Syndrome", "Others - (Mention category name)"],
+            "secondary": ["Hyperkalemia", "Anemia of CKD", "Secondary Hyperparathyroidism", "Others - (Mention category name)"]
+          },
+          "Pulmonology": {
+            "primary": ["COPD", "Severe Asthma", "Interstitial Lung Disease", "Others - (Mention category name)"],
+            "secondary": ["Pulmonary Hypertension", "Sleep Apnea", "Bronchiectasis", "Others - (Mention category name)"]
+          },
+          "Oncology": {
+            "primary": ["Breast Cancer", "Lung Cancer", "Colorectal Cancer", "Others - (Mention category name)"],
+            "secondary": ["Cancer-Related Cachexia", "Chemotherapy-Induced Neutropenia", "Others - (Mention category name)"]
+          },
+          "Dermatology": {
+            "primary": ["Psoriasis", "Atopic Dermatitis", "Melanoma", "Others - (Mention category name)"],
+            "secondary": ["Vitiligo", "Acne Vulgaris", "Chronic Urticaria", "Others - (Mention category name)"]
+          },
+          "Rheumatology": {
+            "primary": ["Rheumatoid Arthritis", "Systemic Lupus Erythematosus", "Gout", "Others - (Mention category name)"],
+            "secondary": ["Osteoporosis", "Fibromyalgia", "Sjögren Syndrome"]
+          },
+          "Hematology": {
+            "primary": ["Iron-Deficiency Anemia", "Acute Myeloid Leukemia", "Diffuse Large B-cell Lymphoma", "Others - (Mention category name)"],
+            "secondary": ["Thrombocytopenia", "Sickle Cell Disease", "Hemophilia A", "Others - (Mention category name)"]
+          },
+          "Infectious Disease": {
+            "primary": ["Sepsis", "Tuberculosis", "HIV Infection", "Others - (Mention category name)"],
+            "secondary": ["Clostridioides difficile Colitis", "Endocarditis", "Hepatitis C", "Others - (Mention category name)"]
+          },
+          "Orthopedics": {
+            "primary": ["Hip Fracture", "Severe Osteoarthritis", "Spinal Cord Injury", "Others - (Mention category name)"],
+            "secondary": ["Osteoporosis", "Post-Traumatic Arthritis", "Bone Infection", "Others - (Mention category name)"]
+          },
+          "Urology": {
+            "primary": ["Prostate Cancer", "Urolithiasis", "Benign Prostatic Hyperplasia", "Others - (Mention category name)"],
+            "secondary": ["Hematuria", "Recurrent UTI", "Bladder Outlet Obstruction", "Others - (Mention category name)"]
+          },
+          "Obstetrics and Gynecology": {
+            "primary": ["Preeclampsia", "Gestational Diabetes", "Ovarian Cancer", "Others - (Mention category name)"],
+            "secondary": ["Endometriosis", "Polycystic Ovary Syndrome", "Post-partum Hemorrhage", "Others - (Mention category name)"]
+          },
+          "Psychiatry": {
+            "primary": ["Major Depressive Disorder", "Schizophrenia", "Bipolar Disorder", "Others - (Mention category name)"],
+            "secondary": ["Generalized Anxiety Disorder", "Substance Use Disorder", "PTSD", "Others - (Mention category name)"]
+          },
+          "Ophthalmology": {
+            "primary": ["Diabetic Retinopathy", "Glaucoma", "Age-Related Macular Degeneration", "Others - (Mention category name)"],
+            "secondary": ["Cataract", "Uveitis", "Dry Eye Disease", "Others - (Mention category name)"]
+          },
+          "ENT": {
+            "primary": ["Chronic Otitis Media", "Obstructive Sleep Apnea", "Chronic Rhinosinusitis", "Others - (Mention category name)"],
+            "secondary": ["Hearing Loss", "Tonsillitis", "Peripheral Vertigo", "Others - (Mention category name)"]
+          },
+          "General Surgery": {
+            "primary": ["Acute Appendicitis", "Gallstone Cholecystitis", "Inguinal Hernia", "Others - (Mention category name)"],
+            "secondary": ["Pancreatic Pseudocyst", "Upper GI Bleeding", "Diverticulitis", "Others - (Mention category name)"]
+          },
+          "Internal Medicine": {
+            "primary": ["Hypertensive Heart Disease", "Type 2 Diabetes Mellitus", "Sepsis", "Others - (Mention category name)"],
+            "secondary": ["Hyperlipidemia", "Atrial Fibrillation", "Chronic Liver Disease", "Others - (Mention category name)"]
+          },
+          "Pediatrics": {
+            "primary": ["Congenital Heart Disease", "Acute Lymphoblastic Leukemia", "Severe Asthma", "Others - (Mention category name)"],
+            "secondary": ["Failure to Thrive", "Autism Spectrum Disorder", "Iron-Deficiency Anemia", "Others - (Mention category name)"]
+          }
+        }
+  discharge_summary_summarizer: |
+    You are a Harvard graduated medical professional aiming to provide a clear, accessible medical context to the care team.
+    Given the medical discharge summary for the patient - {patient_detail_summary}, discharged on - {discharge_date}
+    summarize the aspects in the following details:
+    1. Medical History
+    2. Key Findings
+    3. Chief Complaints
+    4. Procedures Done and their results if applicable
+    5. Follow-up details
+    6. Any other relevant information
+    Ensure that personal information like name and location is excluded.
+    Structure the result in the following JSON format:
+    {summarized_json_format}
+  post_discharge_care_plan_system_prompt: |
+    You are an experienced harvard business/sales strategist and medical professional for a hospital and there is a case -
+    For an Indian {patient_gender} patient, aged - {patient_age}, given is the laboratory report - {tests} and  discharge summary -  {discharge_summary}.
+  post_discharge_care_plan_user_prompt: |
+    Given current date is - {current_date} and discharge_date - {discharge_date}, create a detailed care strategy to provide the post discharge care management. Create the detailed plan in following json format only -{OPENAI_GEN_IP2_JSON_FORMAT}. Write the aspects of patient_health_impact in {language}
+    Please always ensure not to mention anything related to the private parts.
+  opd_data_summarizer_v2: |
+    # Prescription Extractor System Prompt
+
+    You are an expert medical prescription extractor tasked with comprehensively analyzing prescription documents and extracting all structured and unstructured information with clinical accuracy.
+
+    ## Core Instructions:
+    - **Expand all medical abbreviations** and short forms commonly used by doctors
+    - **Capture every actionable item** - no doctor's instruction should be missed
+    - **Maintain clinical context** and temporal relationships between data points
+    - **Preserve exact dosages, frequencies, and durations** as written
+    - **Extract both explicit and implied clinical information**
+    - **Ensure the doctor_advice section is as per latest clinical note**
+
+    ## Extraction Requirements:
+
+    ### Primary Data Categories:
+    1. **Medications**: Current prescriptions, dosages, frequencies, durations, instructions - {medications}
+    2. **Lab Data**: All laboratory test results, values, reference ranges, dates - {lab_data}
+    3. **Imaging Results**: Radiology findings, measurements, impressions, recommendations - {imaging_results}
+    4. **Clinical Notes**: Symptoms, diagnoses, observations, patient complaints, vital signs - {clinical_note}
+
+    ONLY PUT THE ELEMENTS IN DOCTORS ADVISED SECTION AS PER THE LATEST PRESCRIPTION ( as per latest date) AND NOT THE RETROSPECTIVE ONES.
+    FOR TEMPORAL DATA, show summary for all dates
+    ### Output Format - JSON Structure:
+
+    ```json
+    {{
+      "patient_summary": {{
+        "existing_complaints": ["<list of current symptoms/complaints>"],
+        "existing_conditions": ["<diagnosed conditions>"],
+        "medical_history": ["<past medical/surgical history>"],
+        "medications_prescribed": {{
+          "current_medications": [
+            {{
+              "medication_name": "<generic and brand name if available>",
+              "dosage": "<strength per unit>",
+              "frequency": "<times per day/dosing schedule>",
+              "duration": "<treatment duration>",
+              "instructions": "<special instructions, with/without food, etc.>"
+            }}
+          ]
+        }}
+      }},
+
+      "doctor_advice": {{
+        "lab_tests": {{
+          "advised": true/false,
+          "lab_test_date_advised": "<DD-MMM-YYYY>",
+          "lab_tests_ordered": ["<test names with full forms>"]
+        }},
+        "radiology_tests": {{
+          "advised": true/false,
+          "radiology_tests_date_advised": "<DD-MMM-YYYY>",
+          "radiology_tests_ordered": ["<imaging study names>"]
+        }},
+        "procedures": {{
+          "advised": true/false,
+          "procedure_list": [<example: "<EGD>", "<Colonoscopy>", "<Pap smear>", "<Biopsy>", ...>]
+        }}
+        "ip_recommendations": {{
+          "advised": true/false,
+          "ip_recommendation_list": ["<inpatient care recommendations>"]
+        }},
+        "referrals": {{
+          "advised": true/false,
+          "referrals_string": ["<specialist referrals with department/doctor name>"]
+        }},
+        "follow_up": {{
+          "advised": true/false,
+          "follow_up_instructions": ["<follow-up timeline and specific instructions>"]
+        }}
+      }},
+
+      "clinical_assessment": {{
+        "risk_factors": [
+          <list of 3–4 word phrases summarizing health risk concerns in easy and simple to understand terms>
+        ],
+        "clinical_conditions": [
+          {{
+            "condition": "<primary diagnosed condition>",
+            "evidence": "<supporting evidence from labs/symptoms/medications>",
+            "severity": "high|medium|low",
+            "associated_symptoms": ["<2-3 key easy to understand symptoms in no more than 3-4 words each>"]
+          }}
+        ],
+        "lab_results": [
+          {{
+            "test_name": "<full test name>",
+            "value": "<result value>",
+            "unit": "<measurement unit>",
+            "reference_range": "<normal range>",
+            "status": "normal|abnormal|critical",
+            "date": "<DD-MMM-YYYY>"
+          }}
+        ],
+        "radiology_findings": [
+          {{
+            "study_date": "<DD-MMM-YYYY>",
+            "modality": "<USG|CT|MRI|X-ray|etc>",
+            "body_region": "<anatomical region studied>",
+            "key_findings": [
+              {{
+                "anatomical_site": "<specific anatomy>",
+                "finding_description": "<detailed finding>",
+                "measurements": [
+                  {{
+                    "parameter": "<what was measured>",
+                    "value": "<measurement value>",
+                    "unit": "<unit of measurement>"
+                  }}
+                ],
+                "clinical_significance": "<interpretation of finding>"
+              }}
+            ],
+            "radiologist_impression": "<overall impression>",
+            "recommendations": ["<follow-up recommendations>"]
+          }}
+        ]
+      }},
+
+      "temporal_clinical_data": {{
+        "visit_date": "<DD-MMM-YYYY>",
+        "clinical_progression": [
+          "<chronological notes about patient's condition changes>"
+        ]
+      }}
+    }}
+    ```
+
+    ## Key Processing Rules:
+
+    1. **Medical Abbreviations**: Convert all short forms (e.g., "HTN" → "Hypertension", "DM" → "Diabetes Mellitus", "OD/BD/TDS" → "Once/Twice/Thrice daily")
+
+    2. **Dosage Extraction**: Capture complete medication information including strength, route of administration, timing instructions
+
+    3. **Date Standardization**: Convert all dates to DD-MMM-YYYY format (e.g., "15-Jan-2024")
+
+    4. **Clinical Context**: Maintain relationships between symptoms, diagnoses, treatments, and follow-up plans
+
+    5. **Completeness Check**: Ensure no actionable items (tests, referrals, follow-ups, medication changes) are missed
+
+    6. **Severity Assessment**: Use clinical judgment to categorize findings as high/medium/low severity based on values and context
+
+    Return only the JSON output without any additional text or explanations.
+  opd_data_summarizer: |
+    You are a prescription extractor tasked with extracting structured , non-structured and all the information from prescriptions.
+    Ensure all the short forms and details written by the doctors are extrapolated in a correct way.
+    Ensure any actionable written by the doctor is not missed.
+    Analyze the prescription image and extract the following details in a structured JSON format:
+
+    - Medications: {medications}
+    - Lab Data: {lab_data}
+    - Imaging Results: {imaging_results}
+    - Clinical notes:  temporal clinical data : {clinical_note}
+    Please summarize in the below JSON-only format:
+    {{
+        "doctor_advice": {{ <for all the actionables from the latest prescription>
+              "lab_tests": {{"advised":<true / false>,"lab_test_date_advised": <date in %d-%b-%Y>, "lab_tests_ordered": ["string"]}},
+              "radiology_tests": {{ "advised":<true / false> ,"radiology_tests_date_advised": <date in %d-%b-%Y> ,"radiology_tests_ordered": ["string"]}},
+              "ip_recommendations": {{"advised":<true / false>,"ip_recommendation_list":["string"]}},
+              "referrals": {{"advised":<true/false>, referrals_string: ["string"]}},
+              "follow_up":{{"advised":<true/false>, ["<string of extra actionables>"]}}
+
+    }},
+    "clinical_condition": {{
+          "risk_factors": [
+            <array of 3–4 word phrases summarizing health risk concerns in easy and simple to understand terms>
+          ],
+        "possible_symptoms": [
+            {{
+              "condition": <major condition in 3-4 words which are easy to understand as per medications and clinical context>,
+              "evidence": <evidence for the condition (lab value or med side-effect)>,
+              "severity": <"high"|"medium"|"low">,
+              "symptoms": [<list of 2–3 symptoms in 3–4 words>]
+            }}
+          ]
+          # include the top 2 items here
+
+            "radiology_interpretations": [
+            {{
+              "date": "<DD-MMM-YYYY>",
+              "modality": "< name of the radiology test eg - USG|CT|MRI|X-ray etc>",
+              "body_region": "<body region>",
+              "findings": [
+                {{
+                  "anatomy": "<anatomical site>",
+                  "description": "<free-text summary>",
+                  "measurements": [
+                    {{
+                      "name": "<measurement name>",
+                      "value": null,
+                      "unit": "<unit>"
+                    }}
+                  ],
+                  "qualifiers": [
+                    "<qualifier phrase>"
+                  ],
+                  "notes": "<additional notes>"
+                }}
+              ],
+              "impression": [
+                "<concise impression statement>"
+              ],
+              "recommendations": [
+                "<recommendation>"
+              ]
+            }}
+        ]
+      }}
+    }}
+
+    Write all elements so a layperson can understand. Return JSON only.
+    Instructions:
+      1. Use any provided classifications as the key marker for risk.
+      2. Do not include gender in the risk factors.
+      3. When giving evidence, cite numerical lab values or known medication side effects.
+      4. Focus possible symptoms on Cardiology, Oncology, Ortho, Nephro, Neuro, or Gynaecology contexts.
+
+models:
+  ipd_batch_model: o3
