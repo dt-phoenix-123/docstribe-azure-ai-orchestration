@@ -14,6 +14,10 @@ from docstribe_agent_config import (
     PDCM_BATCH_COLLECTION,
     PDCM_COLLECTION,
 )
+from storage import load_storage_settings
+
+
+_storage_settings = load_storage_settings()
 
 
 @dataclass
@@ -27,20 +31,18 @@ class AutomationConfig:
     collect_queue: str = os.getenv("AUTOMATION_COLLECT_QUEUE", "opd:collect")
     batch_queue: str = os.getenv("AUTOMATION_BATCH_QUEUE", "opd:batch")
     completed_queue: str = os.getenv("AUTOMATION_COMPLETED_QUEUE", "opd:completed")
-    jsonl_path: str = os.getenv(
-        "AUTOMATION_JSONL_PATH",
-        "/Users/Dr.NidhiChandra/Desktop/max/Max_AI_Orchestration/data/jsonl/continental_opd_jsonl_file.jsonl",
-    )
-    pdcm_jsonl_path: str = os.getenv(
-        "AUTOMATION_PDCM_JSONL_PATH",
-        "/Users/Dr.NidhiChandra/Desktop/max/Max_AI_Orchestration/data/jsonl/ipd_jsonl_batch_file.jsonl",
-    )
     mongodb_uri: str = DOCSTRIBE_MONGODB_URI
     mongodb_db: str = LLM_ORCHESTRATOR_DB
     opd_collection: str = OPD_COLLECTION
     pdcm_collection: str = PDCM_COLLECTION
     opd_batch_collection: str = OPD_BATCH_COLLECTION
     pdcm_batch_collection: str = PDCM_BATCH_COLLECTION
+    storage_backend: str = _storage_settings.backend
+    storage_container: str = _storage_settings.container
+    storage_prefix: str = _storage_settings.prefix
+    local_storage_root: str = _storage_settings.local_root
+    opd_storage_key: str = _storage_settings.opd_key
+    pdcm_storage_key: str = _storage_settings.pdcm_key
 
 
 config = AutomationConfig()

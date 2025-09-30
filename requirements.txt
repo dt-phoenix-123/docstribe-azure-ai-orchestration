@@ -16,3 +16,6 @@ langchain-mistralai
 langchain-deepseek
 beautifulsoup4
 redis
+boto3
+azure-storage-blob
+google-cloud-storage

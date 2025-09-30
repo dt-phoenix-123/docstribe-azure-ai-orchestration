@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, List
 
 from .api_client import DocstribeAPIClient
@@ -30,9 +31,9 @@ def collect_pending_opd(api: DocstribeAPIClient, docs: List[Dict[str, Any]]) -> 
     return api.collect_opd_pending_requests(responses)
 
 
-def submit_opd_batch(api: DocstribeAPIClient) -> Dict[str, Any]:
-    logger.info("Uploading OPD JSONL batch from %s", config.jsonl_path)
-    return api.upload_batch("OPD", config.jsonl_path)
+def submit_opd_batch(api: DocstribeAPIClient, file_path: Path) -> Dict[str, Any]:
+    logger.info("Uploading OPD JSONL batch from %s", file_path)
+    return api.upload_batch("OPD", str(file_path))
 
 
 def check_batches(api: DocstribeAPIClient, batch_ids: List[str]) -> List[Dict[str, Any]]:

@@ -48,11 +48,6 @@ try:  # OpenAI client
 except ImportError as exc:  # pragma: no cover - surfaced clearly at runtime
     raise ImportError("openai package is required for Docstribe Orchestrator") from exc
 
-try:  # optional redis usage for queue publishing
-    import redis  # type: ignore
-except ImportError:  # pragma: no cover - runtime guard
-    redis = None  # type: ignore
-
 try:  # Domain-specific helpers
     from docstribe_summarizer import (
         summarize_diagnostics,
@@ -380,42 +375,14 @@ class LocalJSONLStore:
 
 
 class LocalPublisher:
-    """Publisher that prefers Redis queues and falls back to JSONL."""
+    """Minimal Pub/Sub-like publisher writing payloads to JSONL topics."""
 
     def __init__(self, base_path: Path):
         self.jsonl_store = LocalJSONLStore(base_path)
-        redis_url = os.getenv("AUTOMATION_REDIS_URL")
-        self.redis_client = None
-        if redis is not None and redis_url:
-            try:
-                self.redis_client = redis.Redis.from_url(redis_url, decode_responses=True)
-            except Exception:  # pragma: no cover - redis unreachable
-                self.redis_client = None
-        self.topic_queue_map: Dict[str, str] = {}
-
-    def configure_topic(self, topic: str, queue_name: str) -> None:
-        self.topic_queue_map[topic] = queue_name
 
     def publish(self, topic: str, data: bytes) -> str:
         message_id = uuid.uuid4().hex
         payload = {"message_id": message_id, "topic": topic, "data": data.decode("utf-8")}
-        queue_name = self.topic_queue_map.get(topic)
-        if self.redis_client is not None and queue_name:
-            try:
-                try:
-                    job = json.loads(payload["data"])
-                except json.JSONDecodeError:
-                    job = payload
-                self.redis_client.rpush(queue_name, json.dumps(job))
-                logger.debug(
-                    "Queued message %s onto redis queue %s (payload keys=%s)",
-                    message_id,
-                    queue_name,
-                    list(job.keys()),
-                )
-                return message_id
-            except Exception:  # pragma: no cover - fall back to file
-                logger.exception("Redis publish failed for queue %s; writing to file instead", queue_name)
         filename = f"{topic}.jsonl"
         self.jsonl_store.append(filename, payload)
         return message_id
@@ -526,18 +493,6 @@ class DocstribeOrchestrator:
             "opd_topic_id": os.getenv("DOCSTRIBE_OPD_TOPIC_ID", "opd-payload"),
         }
 
-        opd_queue = os.getenv("AUTOMATION_INCOMING_QUEUE", "opd:incoming")
-        pdcm_queue = os.getenv("AUTOMATION_PDCM_QUEUE", "pdcm:incoming")
-        self.publisher.configure_topic(self.project_settings["opd_topic_id"], opd_queue)
-        self.publisher.configure_topic(self.project_settings["topic_id"], pdcm_queue)
-
-        if self.mongo_database is not None:
-            logger.info(
-                "Connected to MongoDB database '%s'", getattr(self.mongo_database, "name", "unknown")
-            )
-        else:
-            logger.info("Operating with local state store at %s", self.state_store.path)
-
     # ------------------------------------------------------------------
     @staticmethod
     def _select_reasoning_llm(alias: str):
@@ -554,14 +509,17 @@ class DocstribeOrchestrator:
         return llm
 
     def _azure_batch_url(self) -> str:
-        return "/v1/chat/completions"
+        return (
+            f"/openai/deployments/{self.azure_deployment}/chat/completions"
+            f"?api-version={self.azure_api_version}"
+        )
 
     # ------------------------------------------------------------------
     def _init_collections(self) -> Dict[str, Any]:
         names = {
             "pdcm_collection": getattr(agent_cfg, "PDCM_COLLECTION", "pdcm"),
             "batch_collection": getattr(agent_cfg, "PDCM_BATCH_COLLECTION", "pdcm_batches"),
-            "opd_collection": "opd_workflow",
+            "opd_collection": getattr(agent_cfg, "OPD_COLLECTION", "opd"),
             "opd_batch_collection": getattr(agent_cfg, "OPD_BATCH_COLLECTION", "opd_batches"),
             "opd_initial_collection": getattr(agent_cfg, "OPD_INITIAL_COLLECTION", "opd_initial"),
             "pdcm_initial_collection": getattr(agent_cfg, "PDCM_INITIAL_COLLECTION", "pdcm_initial"),
@@ -662,6 +620,7 @@ class DocstribeOrchestrator:
             input_file_id=batch_input_file_id,
             endpoint="/chat/completions",
             completion_window="24h",
+            model=self.azure_deployment,
             metadata={"description": f"batch job for file id -{batch_input_file_id}"},
         )
 
@@ -1035,13 +994,6 @@ class DocstribeOrchestrator:
         data_payload = payload.get("data_payload", {})
         visits_payload = data_payload.get("visits", [])
 
-        logger.debug(
-            "handle_process_opd_message: prompt_code=%s patient_id=%s visits=%d",
-            prompt_code,
-            data_payload.get("patient_id"),
-            len(visits_payload),
-        )
-
         gender = data_payload.get("gender", "Male")
         if gender.lower() == "male":
             gender = "Male"
@@ -1114,12 +1066,6 @@ class DocstribeOrchestrator:
             resp_content["abnormalities_identified"] = resp_to_summarize.get("visits", visits_payload)
             insert_result = self.collections["opd_collection"].insert_one(resp_content)
             resp_content["_id"] = str(getattr(insert_result, "inserted_id", ""))
-            logger.debug(
-                "Inserted OPD document for patient_id=%s status=%s _id=%s",
-                data_payload.get("patient_id"),
-                resp_content.get("status"),
-                resp_content.get("_id"),
-            )
             return resp_content
 
         return {
@@ -1266,9 +1212,6 @@ class DocstribeOrchestrator:
             return self._options_ok()
 
         responses = payload.get("responses", [])
-        logger.debug(
-            "collect_opd_pending_requests: received %d response entries", len(responses)
-        )
         opd_collection = self.collections["opd_collection"]
         for resp in responses:
             patient_details = resp.get("patient_details", {})
@@ -1276,16 +1219,8 @@ class DocstribeOrchestrator:
             patient_age = patient_details.get("age")
             patient_gender = patient_details.get("gender")
 
-            logger.debug(
-                "collect_opd_pending_requests: processing patient_id=%s", patient_id
-            )
-
             patient_doc = opd_collection.find_one({"patient_details.patient_id": patient_id})
             if patient_doc and patient_doc.get("status") == "processing":
-                logger.debug(
-                    "collect_opd_pending_requests: patient_id=%s already processing, skipping",
-                    patient_id,
-                )
                 continue
 
             current_date = dt.datetime.now().strftime("%d-%b-%Y")
@@ -1305,23 +1240,10 @@ class DocstribeOrchestrator:
                 radiology_findings,
             )
             self.append_to_opd_blob(opd_payload)
-            update_result = opd_collection.update_one(
+            opd_collection.update_one(
                 {"patient_details.patient_id": patient_id},
                 {"$set": {"status": "processing"}},
             )
-            matched = getattr(update_result, "matched_count", 0)
-            modified = getattr(update_result, "modified_count", 0)
-            logger.debug(
-                "collect_opd_pending_requests: status update patient_id=%s matched=%s modified=%s",
-                patient_id,
-                matched,
-                modified,
-            )
-            if matched == 0:
-                logger.warning(
-                    "collect_opd_pending_requests: no document matched for patient_id=%s",
-                    patient_id,
-                )
         return {"status": "success"}
 
     # ------------------------------------------------------------------

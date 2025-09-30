@@ -17,6 +17,7 @@ from .api_client import DocstribeAPIClient
 from .config import config
 from .redis_queue import RedisQueue
 from . import tasks
+from storage import get_storage_backend
 
 logger = logging.getLogger(__name__)
 
@@ -66,23 +67,26 @@ class PendingCollectorWorker(BaseWorker):
 
 
 class BatchSubmitWorker(BaseWorker):
-    def __init__(self, api: DocstribeAPIClient, orchestrator: "AutomationOrchestrator", stop_event: threading.Event, interval: int) -> None:
+    def __init__(
+        self,
+        api: DocstribeAPIClient,
+        orchestrator: "AutomationOrchestrator",
+        storage_backend,
+        storage_key: str,
+        stop_event: threading.Event,
+        interval: int,
+    ) -> None:
         super().__init__(name="BatchSubmitWorker", stop_event=stop_event)
         self.api = api
         self.interval = interval
         self.orchestrator = orchestrator
-
-    def _jsonl_line_count(self, path: Path) -> int:
-        if not path.exists():
-            return 0
-        with path.open("r", encoding="utf-8") as fh:
-            return sum(1 for _ in fh if _.strip())
+        self.storage = storage_backend
+        self.storage_key = storage_key
 
     def run(self) -> None:  # pragma: no cover
-        jsonl_path = Path(config.jsonl_path)
         while not self.stopped():
             try:
-                line_count = self._jsonl_line_count(jsonl_path)
+                line_count = self.storage.line_count(self.storage_key)
                 pending_count = tasks.count_pending_docs()
                 processing_count = tasks.count_processing_batches()
 
@@ -94,18 +98,46 @@ class BatchSubmitWorker(BaseWorker):
                 elif line_count > 0 and processing_count >= config.batch_threshold:
                     submit_reason = f"processing backlog {processing_count}"
 
-                if submit_reason:
-                    logger.info("Submitting batch because %s", submit_reason)
-                    response = tasks.submit_opd_batch(self.api)
+                if not submit_reason:
+                    time.sleep(self.interval)
+                    continue
+
+                logger.info("Submitting batch because %s", submit_reason)
+                tmp_path: Optional[Path] = None
+                try:
+                    tmp_path = self.storage.download_to_tempfile(self.storage_key, suffix=".jsonl")
+                except FileNotFoundError:
+                    logger.warning(
+                        "Batch submission triggered but storage object %s was not found",
+                        self.storage_key,
+                    )
+
+                if tmp_path is None:
+                    time.sleep(self.interval)
+                    continue
+
+                try:
+                    response = tasks.submit_opd_batch(self.api, tmp_path)
                     batch_id = response.get("batch_id") or response.get("id")
                     if batch_id:
                         logger.info("Submitted batch %s", batch_id)
                         self.orchestrator.register_batch(batch_id, "OPD")
                         try:
-                            jsonl_path.unlink(missing_ok=True)
-                            logger.debug("Cleared JSONL file after batch submission")
+                            self.storage.delete(self.storage_key)
+                            logger.debug(
+                                "Cleared storage object %s after batch submission",
+                                self.storage_key,
+                            )
                         except Exception as exc:
-                            logger.warning("Failed to delete JSONL file %s: %s", jsonl_path, exc)
+                            logger.warning(
+                                "Failed to delete storage object %s: %s",
+                                self.storage_key,
+                                exc,
+                            )
+                finally:
+                    if tmp_path is not None:
+                        tmp_path.unlink(missing_ok=True)
+
                 time.sleep(self.interval)
             except Exception as exc:
                 logger.exception("Batch submission failed: %s", exc)
@@ -141,7 +173,7 @@ class BatchPollerWorker(BaseWorker):
                 try:
                     status = self.api.check_batch_status(batch_id)
                     state = status.get("status")
-                    logger.debug("Batch %s status=%s", batch_id, state)
+                    logger.info("Batch %s status=%s", batch_id, state)
                     if state == "completed" and status.get("output_file_id"):
                         file_id = status.get("output_file_id")
                         file_type = "PDCM" if batch_type == "PDCM" else "OPD"
@@ -189,6 +221,7 @@ class AutomationOrchestrator:
         self.workers: List[BaseWorker] = []
         self._active_batches: Dict[str, str] = {}
         self._batch_lock = threading.Lock()
+        self.storage_backend = get_storage_backend()
 
     def register_batch(self, batch_id: str, batch_type: str) -> None:
         with self._batch_lock:
@@ -222,7 +255,14 @@ class AutomationOrchestrator:
         logger.info("Starting automation orchestrator")
         incoming_worker = IncomingWorker(self.incoming_queue, self.api, self.stop_event)
         collector_worker = PendingCollectorWorker(self.api, self.stop_event, interval=60)
-        batch_submit_worker = BatchSubmitWorker(self.api, self, self.stop_event, interval=30)
+        batch_submit_worker = BatchSubmitWorker(
+            self.api,
+            self,
+            self.storage_backend,
+            config.opd_storage_key,
+            self.stop_event,
+            interval=30,
+        )
         batch_poller_worker = BatchPollerWorker(self.api, self, self.stop_event, interval=config.poll_interval_seconds)
         result_worker = ResultWorker(self.api, self.completed_queue, self.stop_event)
 
