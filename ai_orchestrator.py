@@ -493,6 +493,13 @@ class DocstribeOrchestrator:
             "opd_topic_id": os.getenv("DOCSTRIBE_OPD_TOPIC_ID", "opd-payload"),
         }
 
+        self._automation_enabled = os.getenv("AUTOMATION_ENABLED", "false").lower() == "true"
+        self._automation_redis_url = os.getenv("AUTOMATION_REDIS_URL", "redis://localhost:6379/0")
+        self._automation_opd_queue = os.getenv("AUTOMATION_INCOMING_QUEUE", "opd:incoming")
+        self._automation_pdcm_queue = os.getenv("AUTOMATION_PDCM_QUEUE", "pdcm:incoming")
+        self._redis_client = None
+        self._redis_init_failed = False
+
     # ------------------------------------------------------------------
     @staticmethod
     def _select_reasoning_llm(alias: str):
@@ -509,10 +516,41 @@ class DocstribeOrchestrator:
         return llm
 
     def _azure_batch_url(self) -> str:
-        return (
-            f"/openai/deployments/{self.azure_deployment}/chat/completions"
-            f"?api-version={self.azure_api_version}"
-        )
+        return "/chat/completions"
+
+    def _automation_redis(self):
+        if not self._automation_enabled or self._redis_init_failed:
+            return None
+        if self._redis_client is not None:
+            return self._redis_client
+        try:
+            import redis  # type: ignore
+        except ImportError:
+            logger.warning("redis package not installed; automation queue dispatch disabled")
+            self._redis_init_failed = True
+            return None
+        try:
+            self._redis_client = redis.Redis.from_url(
+                self._automation_redis_url,
+                decode_responses=True,
+            )
+        except Exception:
+            logger.exception("Failed to connect to Redis at %s", self._automation_redis_url)
+            self._redis_init_failed = True
+            return None
+        return self._redis_client
+
+    def _enqueue_automation_job(self, queue_name: str, payload: Dict[str, Any]) -> None:
+        if not queue_name:
+            return
+        client = self._automation_redis()
+        if client is None:
+            return
+        try:
+            client.rpush(queue_name, json.dumps(payload))
+            logger.debug("Enqueued automation payload on %s", queue_name)
+        except Exception:
+            logger.exception("Failed to enqueue automation payload on %s", queue_name)
 
     # ------------------------------------------------------------------
     def _init_collections(self) -> Dict[str, Any]:
@@ -620,7 +658,6 @@ class DocstribeOrchestrator:
             input_file_id=batch_input_file_id,
             endpoint="/chat/completions",
             completion_window="24h",
-            model=self.azure_deployment,
             metadata={"description": f"batch job for file id -{batch_input_file_id}"},
         )
 
@@ -1528,6 +1565,8 @@ class DocstribeOrchestrator:
         self.collections["opd_initial_collection"].insert_one(payload)
         topic = self.project_settings["opd_topic_id"]
         message_id = self.publisher.publish(topic, json_output.encode("utf-8"))
+        automation_payload = json.loads(json_output)
+        self._enqueue_automation_job(self._automation_opd_queue, automation_payload)
         return {"status": "success", "message": f"Published to topic with {message_id}"}
 
     def handle_process_ip(self, payload: Dict[str, Any]):
@@ -1538,6 +1577,8 @@ class DocstribeOrchestrator:
         self.collections["pdcm_initial_collection"].insert_one(payload)
         topic = self.project_settings["topic_id"]
         message_id = self.publisher.publish(topic, json_output.encode("utf-8"))
+        automation_payload = json.loads(json_output)
+        self._enqueue_automation_job(self._automation_pdcm_queue, automation_payload)
         return {"status": "success", "message": f"Published to topic with {message_id}"}
 
     # ------------------------------------------------------------------
