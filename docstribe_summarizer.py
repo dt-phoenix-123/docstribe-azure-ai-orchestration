@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
-from crewai import Agent, Task, Crew, Process
+# from crewai import Agent, Task, Crew, Process
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_deepseek import ChatDeepSeek
 from langchain_groq import ChatGroq
@@ -167,35 +167,35 @@ def _grok_chat_completion(
 # Agent definitions (lazily created when prerequisites are available)
 # ---------------------------------------------------------------------------
 
-if openai_llm is not None:
-    medical_summarization_agent = Agent(
-        role="Medical History summarizer",
-        goal="Understand the medical history and summarize it in a way that helps a healthcare professional to deliver a better care",
-        backstory=(
-            "You are a harvard graduated medical person and you want that a patient's medical context is readily available with the care team"
-        ),
-        verbose=False,
-        memory=False,
-        llm=openai_llm,
-        allow_delegation=False,
-    )
-else:  # pragma: no cover - depends on runtime config
-    medical_summarization_agent = None
+# if openai_llm is not None:
+#     medical_summarization_agent = Agent(
+#         role="Medical History summarizer",
+#         goal="Understand the medical history and summarize it in a way that helps a healthcare professional to deliver a better care",
+#         backstory=(
+#             "You are a harvard graduated medical person and you want that a patient's medical context is readily available with the care team"
+#         ),
+#         verbose=False,
+#         memory=False,
+#         llm=openai_llm,
+#         allow_delegation=False,
+#     )
+# else:  # pragma: no cover - depends on runtime config
+#     medical_summarization_agent = None
 
-if openai_llm is not None:
-    pdf_agent = Agent(
-        role="Radiologist",
-        goal="Analyze the given pdf report dump and summarize it in crisp format",
-        verbose=True,
-        memory=False,
-        backstory=(
-            "As a radiologist from harvard, your mission is to extract critical medical information from PDF documents and provide concise summaries."
-        ),
-        llm=openai_llm,
-        allow_delegation=False,
-    )
-else:  # pragma: no cover - depends on runtime config
-    pdf_agent = None
+# if openai_llm is not None:
+#     pdf_agent = Agent(
+#         role="Radiologist",
+#         goal="Analyze the given pdf report dump and summarize it in crisp format",
+#         verbose=True,
+#         memory=False,
+#         backstory=(
+#             "As a radiologist from harvard, your mission is to extract critical medical information from PDF documents and provide concise summaries."
+#         ),
+#         llm=openai_llm,
+#         allow_delegation=False,
+#     )
+# else:  # pragma: no cover - depends on runtime config
+#     pdf_agent = None
 
 
 # ---------------------------------------------------------------------------
