@@ -1,0 +1,39 @@
+FROM python:3.11-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application code from project root
+COPY ai_orchestrator.py /app/
+COPY docstribe_agent_config.py /app/
+COPY docstribe_summarizer.py /app/
+COPY opd_pydantic_validator.py /app/
+COPY prompt_config.yaml /app/
+COPY automation/ /app/automation/
+COPY storage/ /app/storage/
+
+# Create storage directory with proper permissions
+RUN mkdir -p /app/data && chmod 755 /app/data
+
+# Expose port (Flask typically runs on 5000)
+EXPOSE 5000
+
+# Set environment variables
+ENV FLASK_APP=ai_orchestrator.py
+ENV FLASK_ENV=production
+ENV PYTHONPATH=/app
+
+# Run the application
+CMD ["python", "ai_orchestrator.py"]

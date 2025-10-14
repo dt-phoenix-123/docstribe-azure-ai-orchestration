@@ -1,0 +1,108 @@
+version: "3"
+
+services:
+  # Existing MAX services
+  max-app:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/max-app:latest
+    environment:
+      - project_id=${project_id}
+      - google_key_base64=${google_key_base64}
+      - ENV=${ENV}
+      - STORAGE_TYPE=LOCAL
+    volumes:
+      - ./storage:/app/storage
+      - ./docstribe_backend:/app/docstribe_backend
+    expose:
+      - "8000"   # internal only (removed ports mapping)
+    depends_on:
+      - redis
+
+  max-celery-app:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/max-celery-app:latest
+    environment:
+      - project_id=${project_id}
+      - google_key_base64=${google_key_base64}
+      - ENV=${ENV}
+      - STORAGE_TYPE=LOCAL
+    volumes:
+      - ./storage:/app/storage
+      - ./docstribe_backend:/app/docstribe_backend
+    depends_on:
+      - redis
+
+  max-celery-beat-app:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/max-celery-beat-app:latest
+    environment:
+      - project_id=${project_id}
+      - google_key_base64=${google_key_base64}
+      - ENV=${ENV}
+      - STORAGE_TYPE=LOCAL
+    volumes:
+      - ./storage:/app/storage
+      - ./docstribe_backend:/app/docstribe_backend
+    depends_on:
+      - redis
+
+  max-ui-app:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/docsctribe-frontend-app-max:latest
+
+  # AI Orchestration services
+  ai-orchestrator-app:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/ai-orchestrator-app:latest
+    env_file:
+      - ${AI_ORCHESTRATOR_APP_ENV_FILE:-./config/ai_orchestrator_app.env}
+    volumes:
+      - ./data:/app/data
+      - ./tmp:/tmp
+    ports:
+      - "5001:5000"   # keep host access for debugging if needed
+    depends_on:
+      - redis-ai
+
+  ai-orchestrator-worker:
+    image: asia-south2-docker.pkg.dev/${project_id}/${REPO_NAME}/ai-orchestrator-worker:latest
+    env_file:
+      - ${AI_ORCHESTRATOR_WORKER_ENV_FILE:-./config/ai_orchestrator_app.env}
+    volumes:
+      - ./data:/app/data
+      - ./tmp:/tmp
+    depends_on:
+      - redis-ai
+
+  # Redis instances
+  redis:
+    image: redis:latest
+    ports:
+      - "6379:6379"
+    command: redis-server --port 6379
+
+  redis-ai:
+    image: redis:latest
+    ports:
+      - "6378:6379"
+    command: redis-server --port 6379
+    volumes:
+      - redis-ai-data:/data
+
+  nginx:
+    image: nginx:latest
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8000:8000"  # host 8000 now belongs only to nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf.template:ro
+      - ./entrypoint.sh:/entrypoint.sh:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    environment:
+      - HOST_NAME=max.docstribe.com
+      - IP_ADDRESS=143.110.252.172 # Replace with your server's public IP
+    depends_on:
+      - max-app
+      - max-celery-app
+      - max-ui-app
+      - ai-orchestrator-app
+    entrypoint: ["/entrypoint.sh"]
+
+volumes:
+  redis-ai-data:
