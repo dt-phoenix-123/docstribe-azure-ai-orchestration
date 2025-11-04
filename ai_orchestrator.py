@@ -447,6 +447,7 @@ class DocstribeOrchestrator:
         self.publisher = LocalPublisher(self.data_dir / "pubsub")
 
         mongo_uri = os.getenv("DOCSTRIBE_MONGODB_URI")
+        self.use_sequential_processing = os.getenv("USE_SEQUENTIAL_PROCESSING", "false").lower() == "true"
         if not mongo_uri and agent_cfg is not None:
             mongo_uri = getattr(agent_cfg, "MONGODB_URI", None)
         self.mongo_client = None
@@ -1362,6 +1363,11 @@ class DocstribeOrchestrator:
     def handle_collect_opd_pending_requests(self, payload: Dict[str, Any]):
         if request.method == "OPTIONS":
             return self._options_ok()
+        
+        if self.use_sequential_processing == True:
+            payload["processing_mode"] = "sequential"
+        else:
+            payload["processing_mode"] = "batch"
 
         responses = payload.get("responses", [])
         use_sequential = self._should_use_sequential(payload)
