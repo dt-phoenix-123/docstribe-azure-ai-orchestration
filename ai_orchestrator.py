@@ -1133,7 +1133,7 @@ class DocstribeOrchestrator:
             event_response = deepcopy(doc.get("event_response") or {})
             if isinstance(event_response, dict) and "request_id" not in event_response:
                 event_response["request_id"] = f"request_{patient_id}"
-            responses.append({"event_response": event_response})
+            responses.append(event_response)
 
         return {"responses": responses}
 
