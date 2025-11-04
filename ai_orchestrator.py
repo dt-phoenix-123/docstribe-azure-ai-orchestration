@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from copy import deepcopy
 from pathlib import Path
@@ -446,6 +447,7 @@ class DocstribeOrchestrator:
         self.publisher = LocalPublisher(self.data_dir / "pubsub")
 
         mongo_uri = os.getenv("DOCSTRIBE_MONGODB_URI")
+        self.use_sequential_processing = os.getenv("USE_SEQUENTIAL_PROCESSING", "false").lower() == "true"
         if not mongo_uri and agent_cfg is not None:
             mongo_uri = getattr(agent_cfg, "MONGODB_URI", None)
         self.mongo_client = None
@@ -500,6 +502,20 @@ class DocstribeOrchestrator:
         self._redis_client = None
         self._redis_init_failed = False
 
+        self.default_processing_mode = os.getenv("DOCSTRIBE_PROCESSING_MODE", "batch").strip().lower()
+        try:
+            self.sequential_max_completion_tokens = int(
+                os.getenv("DOCSTRIBE_MAX_COMPLETION_TOKENS", "4096")
+            )
+        except ValueError:
+            self.sequential_max_completion_tokens = 4096
+        try:
+            self.sequential_retry_attempts = max(
+                1, int(os.getenv("DOCSTRIBE_SEQUENTIAL_RETRIES", "3"))
+            )
+        except ValueError:
+            self.sequential_retry_attempts = 3
+
     # ------------------------------------------------------------------
     @staticmethod
     def _select_reasoning_llm(alias: str):
@@ -517,6 +533,106 @@ class DocstribeOrchestrator:
 
     def _azure_batch_url(self) -> str:
         return "/chat/completions"
+
+    # ------------------------------------------------------------------
+    def _should_use_sequential(self, payload: Optional[Dict[str, Any]] = None) -> bool:
+        mode = self.default_processing_mode
+        candidate_keys = (
+            "processing_mode",
+            "processingMode",
+            "mode",
+            "processing",
+            "processing_type",
+        )
+        payload = payload or {}
+        for key in candidate_keys:
+            value = payload.get(key)
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                mode = "sequential" if value else "batch"
+                break
+            if isinstance(value, str) and value.strip():
+                mode = value.strip().lower()
+                break
+        return mode == "sequential"
+
+    def _execute_chat_completion(self, request_body: Dict[str, Any]):
+        """Invoke Azure OpenAI chat completion with retries for sequential mode."""
+        attempts = 0
+        backoff_seconds = 1.0
+        last_exc: Optional[Exception] = None
+        while attempts < self.sequential_retry_attempts:
+            attempts += 1
+            try:
+                return self.openai_client.chat.completions.create(**request_body)
+            except Exception as exc:
+                last_exc = exc
+                logger.warning(
+                    "Sequential completion attempt %s failed: %s", attempts, exc
+                )
+                if attempts >= self.sequential_retry_attempts:
+                    break
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, 30)
+        assert last_exc is not None  # for mypy/static tools
+        raise last_exc
+
+    @staticmethod
+    def _extract_completion_payload(completion: Any) -> Any:
+        """Extract a JSON payload from a chat completion response."""
+        try:
+            choice = completion.choices[0]
+        except (AttributeError, IndexError, TypeError):
+            return {}
+        message = getattr(choice, "message", {})
+        parsed = getattr(message, "parsed", None)
+        if parsed:
+            return parsed
+        content = getattr(message, "content", "")
+        if isinstance(content, list):
+            text_parts: List[str] = []
+            for fragment in content:
+                if isinstance(fragment, dict):
+                    text_parts.append(str(fragment.get("text", "")))
+                else:
+                    text_parts.append(str(fragment))
+            content = "".join(text_parts)
+        if isinstance(content, str):
+            content = content.strip()
+            if not content:
+                return {}
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                logger.warning("Assistant response was not valid JSON; storing raw text")
+                return {"raw_response": content}
+        return content
+
+    def _process_sequential_request(self, payload: Dict[str, Any]) -> Any:
+        """Execute a single sequential request and return the parsed response."""
+        custom_id = payload.get("custom_id", "")
+        request_body = deepcopy(payload.get("body", {}))
+        if not request_body:
+            raise ValueError("Sequential request payload missing body")
+        request_body.setdefault("model", self.azure_deployment)
+        request_body.setdefault("max_completion_tokens", self.sequential_max_completion_tokens)
+        completion = self._execute_chat_completion(request_body)
+        parsed_body = self._extract_completion_payload(completion)
+        if isinstance(parsed_body, dict) and custom_id:
+            parsed_body.setdefault("request_id", custom_id)
+        return parsed_body
+
+    def _persist_event_response(self, patient_id: str, response_body: Any, collection) -> None:
+        update_doc = {"status": "completed", "event_response": response_body}
+        try:
+            collection.update_one(
+                {"patient_details.patient_id": patient_id},
+                {"$set": update_doc},
+            )
+        except Exception:
+            logger.exception("Failed to persist sequential response for patient %s", patient_id)
+            raise
 
     def _automation_redis(self):
         if not self._automation_enabled or self._redis_init_failed:
@@ -1247,8 +1363,14 @@ class DocstribeOrchestrator:
     def handle_collect_opd_pending_requests(self, payload: Dict[str, Any]):
         if request.method == "OPTIONS":
             return self._options_ok()
+        
+        if self.use_sequential_processing == True:
+            payload["processing_mode"] = "sequential"
+        else:
+            payload["processing_mode"] = "batch"
 
         responses = payload.get("responses", [])
+        use_sequential = self._should_use_sequential(payload)
         opd_collection = self.collections["opd_collection"]
         for resp in responses:
             patient_details = resp.get("patient_details", {})
@@ -1276,6 +1398,23 @@ class DocstribeOrchestrator:
                 latest_visit_date,
                 radiology_findings,
             )
+            if use_sequential:
+                print (f"Inside sequental block")
+                opd_collection.update_one(
+                    {"patient_details.patient_id": patient_id},
+                    {"$set": {"status": "processing"}},
+                )
+                try:
+                    response_body = self._process_sequential_request(opd_payload)
+                    self._persist_event_response(patient_id, response_body, opd_collection)
+                except Exception as exc:
+                    logger.exception("Sequential OPD processing failed", exc_info=True)
+                    opd_collection.update_one(
+                        {"patient_details.patient_id": patient_id},
+                        {"$set": {"status": "failed", "error": str(exc)}},
+                    )
+                continue
+
             self.append_to_opd_blob(opd_payload)
             opd_collection.update_one(
                 {"patient_details.patient_id": patient_id},
@@ -1492,6 +1631,7 @@ class DocstribeOrchestrator:
             return self._options_ok()
 
         responses = payload.get("responses", [])
+        use_sequential = self._should_use_sequential(payload)
         for resp in responses:
             patient_details = resp.get("patient_details", {})
             patient_id = patient_details.get("patient_id")
@@ -1532,6 +1672,22 @@ class DocstribeOrchestrator:
                 )
                 continue
 
+            if use_sequential:
+                self.collections["pdcm_collection"].update_one(
+                    {"patient_details.patient_id": patient_id},
+                    {"$set": {"status": "processing"}},
+                )
+                try:
+                    response_body = self._process_sequential_request(jsonl_payload)
+                    self._persist_event_response(patient_id, response_body, self.collections["pdcm_collection"])
+                except Exception as exc:
+                    logger.exception("Sequential IPD processing failed", exc_info=True)
+                    self.collections["pdcm_collection"].update_one(
+                        {"patient_details.patient_id": patient_id},
+                        {"$set": {"status": "failed", "error": str(exc)}},
+                    )
+                continue
+
             self.append_to_pdcm_blob(jsonl_payload)
             self.collections["pdcm_collection"].update_one(
                 {"patient_details.patient_id": patient_id},
@@ -1540,7 +1696,9 @@ class DocstribeOrchestrator:
 
         return {
             "status": "success",
-            "file_url": str(self.data_dir / "jsonl" / "ipd_jsonl_batch_file.jsonl"),
+            "file_url": None
+            if use_sequential
+            else str(self.data_dir / "jsonl" / "ipd_jsonl_batch_file.jsonl"),
         }
 
     # ------------------------------------------------------------------
