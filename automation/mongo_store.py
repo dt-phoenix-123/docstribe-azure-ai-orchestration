@@ -38,10 +38,26 @@ class MongoStore:
         )
         return list(cursor)
 
+    def fetch_pending_ip_recommendations(self, limit: int = 100) -> List[Dict[str, Any]]:
+        if self.db is None:
+            return []
+        cursor = (
+            self.db[config.ip_recommendation_patient_collection]
+            .find({"status": "pending"})
+            .sort("current_date", -1)
+            .limit(limit)
+        )
+        return list(cursor)
+
     def count_pending_opd_documents(self) -> int:
         if self.db is None:
             return 0
         return self.db[config.opd_collection].count_documents({"status": "pending"})
+
+    def count_pending_ip_recommendations(self) -> int:
+        if self.db is None:
+            return 0
+        return self.db[config.ip_recommendation_patient_collection].count_documents({"status": "pending"})
 
     def fetch_processing_batches(self) -> List[Dict[str, Any]]:
         if self.db is None:

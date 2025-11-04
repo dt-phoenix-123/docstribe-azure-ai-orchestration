@@ -31,6 +31,23 @@ def collect_pending_opd(api: DocstribeAPIClient, docs: List[Dict[str, Any]]) -> 
     return api.collect_opd_pending_requests(responses)
 
 
+def collect_pending_ip_advise(api: DocstribeAPIClient, docs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not docs:
+        return {}
+    patient_ids = []
+    for doc in docs:
+        patient_id = doc.get("patient_details", {}).get("patient_id")
+        if patient_id:
+            patient_ids.append(patient_id)
+    payload: Dict[str, Any] = {}
+    if patient_ids:
+        payload["patient_ids"] = patient_ids
+        payload["limit"] = len(patient_ids)
+    else:
+        payload["limit"] = len(docs)
+    logger.debug("Triggering collect_ip_advise_pending_request for patient_ids=%s", patient_ids)
+    return api.collect_ip_advise_pending_request(payload)
+
 def submit_opd_batch(api: DocstribeAPIClient, file_path: Path) -> Dict[str, Any]:
     logger.info("Uploading OPD JSONL batch from %s", file_path)
     return api.upload_batch("OPD", str(file_path))
@@ -56,10 +73,26 @@ def fetch_pending_docs(limit: int = 100) -> List[Dict[str, Any]]:
         store.close()
 
 
+def fetch_pending_ip_recommendations(limit: int = 100) -> List[Dict[str, Any]]:
+    store = MongoStore()
+    try:
+        return store.fetch_pending_ip_recommendations(limit=limit)
+    finally:
+        store.close()
+
+
 def count_pending_docs() -> int:
     store = MongoStore()
     try:
         return store.count_pending_opd_documents()
+    finally:
+        store.close()
+
+
+def count_pending_ip_recommendations() -> int:
+    store = MongoStore()
+    try:
+        return store.count_pending_ip_recommendations()
     finally:
         store.close()
 

@@ -30,6 +30,15 @@ class DocstribeAPIClient:
         resp.raise_for_status()
         return resp.json()
 
+    def collect_ip_advise_pending_request(self, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        resp = requests.post(
+            self._url("/collect_ip_advise_pending_request"),
+            json=payload or {},
+            timeout=120,
+        )
+        resp.raise_for_status()
+        return resp.json()
+
     def upload_batch(self, batch_type: str, file_path: str) -> Dict[str, Any]:
         resp = requests.post(
             self._url("/upload_batch"),

@@ -743,3 +743,14 @@ master_prompts:
 
 models:
   ipd_batch_model: o3
+
+
+ipd_module_system_prompt: |
+  You are an expert medical professional tasked with creating an inpatient care management plan for a patient based on their clinical data and admission advice.
+  This care plan will be used by hospital care coordinators to ensure comprehensive inpatient management and convincing them for admissions.
+  
+
+ipd_module_user_prompt: |
+  Given the patient details - {patient_details}, please ensure to create the inpatient care plan.
+  As of {current_date}, produce an actionable inpatient care management plan for the patient
+  suitable for a care coordinator. The response must comply with this JSON schema:

@@ -133,6 +133,10 @@ OPD_COLLECTION = os.getenv("OPD_COLLECTION", "opd_workflow")
 OPD_BATCH_COLLECTION = os.getenv("OPD_BATCH_COLLECTION", "opd_batch_log")
 PDCM_INITIAL_COLLECTION = os.getenv("PDCM_INITIAL_COLLECTION", "pdcm_workflow_log")
 OPD_INITIAL_COLLECTION = os.getenv("OPD_INITIAL_COLLECTION", "opd_workflow_log")
+IP_RECOMMENDATION_PATIENT_COLLECTION = os.getenv(
+    "IP_RECOMMENDATION_PATIENT_COLLECTION",
+    "ip_recommendation_patient",
+)
 OPENAI_URL = os.getenv("OPENAI_URL", "https://api.openai.com/v1/chat/completions")
 
 OPENAI_GPT4_TURBO_MODEL = os.getenv("OPENAI_GPT4_TURBO_MODEL", "gpt-4-turbo")
@@ -177,6 +181,7 @@ __all__ = [
     "OPD_BATCH_COLLECTION",
     "PDCM_INITIAL_COLLECTION",
     "OPD_INITIAL_COLLECTION",
+    "IP_RECOMMENDATION_PATIENT_COLLECTION",
     "OPENAI_URL",
     "OPENAI_GPT4_TURBO_MODEL",
     "OPENAI_GPT4O_MODEL",

@@ -66,6 +66,24 @@ class PendingCollectorWorker(BaseWorker):
             time.sleep(self.interval)
 
 
+class IPAdviseCollectorWorker(BaseWorker):
+    def __init__(self, api: DocstribeAPIClient, stop_event: threading.Event, interval: int) -> None:
+        super().__init__(name="IPAdviseCollectorWorker", stop_event=stop_event)
+        self.api = api
+        self.interval = interval
+
+    def run(self) -> None:  # pragma: no cover
+        while not self.stopped():
+            docs = tasks.fetch_pending_ip_recommendations(limit=config.batch_threshold)
+            if docs:
+                logger.info("Collector found %d pending IP advise documents", len(docs))
+                try:
+                    tasks.collect_pending_ip_advise(self.api, docs)
+                except Exception as exc:
+                    logger.exception("collect_ip_advise_pending_request failed: %s", exc)
+            time.sleep(self.interval)
+
+
 class BatchSubmitWorker(BaseWorker):
     def __init__(
         self,
@@ -255,6 +273,7 @@ class AutomationOrchestrator:
         logger.info("Starting automation orchestrator")
         incoming_worker = IncomingWorker(self.incoming_queue, self.api, self.stop_event)
         collector_worker = PendingCollectorWorker(self.api, self.stop_event, interval=60)
+        ip_advise_collector_worker = IPAdviseCollectorWorker(self.api, self.stop_event, interval=60)
         batch_submit_worker = BatchSubmitWorker(
             self.api,
             self,
@@ -269,6 +288,7 @@ class AutomationOrchestrator:
         self.workers = [
             incoming_worker,
             collector_worker,
+            ip_advise_collector_worker,
             batch_submit_worker,
             batch_poller_worker,
             result_worker,

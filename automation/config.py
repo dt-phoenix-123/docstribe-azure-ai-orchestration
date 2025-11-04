@@ -13,6 +13,7 @@ from docstribe_agent_config import (
     OPD_COLLECTION,
     PDCM_BATCH_COLLECTION,
     PDCM_COLLECTION,
+    IP_RECOMMENDATION_PATIENT_COLLECTION,
 )
 from storage import load_storage_settings
 
@@ -37,6 +38,7 @@ class AutomationConfig:
     pdcm_collection: str = PDCM_COLLECTION
     opd_batch_collection: str = OPD_BATCH_COLLECTION
     pdcm_batch_collection: str = PDCM_BATCH_COLLECTION
+    ip_recommendation_patient_collection: str = IP_RECOMMENDATION_PATIENT_COLLECTION
     storage_backend: str = _storage_settings.backend
     storage_container: str = _storage_settings.container
     storage_prefix: str = _storage_settings.prefix

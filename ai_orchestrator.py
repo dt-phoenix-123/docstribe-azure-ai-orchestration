@@ -20,7 +20,9 @@ import uuid
 from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
-
+from langchain_openai import AzureChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from IPDModule import PatientCarePlan
 import requests
 from flask import Flask, Response, jsonify, request
 
@@ -255,6 +257,9 @@ class MongoCollectionAdapter:
     def find_one(self, query: Dict[str, Any]):
         return self.collection.find_one(query)
 
+    def find(self, query: Optional[Dict[str, Any]] = None):
+        return self.collection.find(query or {})
+
     def update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
         return self.collection.update_one(query, update)
 
@@ -312,6 +317,15 @@ class LocalCollectionAdapter:
             if self._matches(doc, query):
                 return deepcopy(doc)
         return None
+
+    def find(self, query: Optional[Dict[str, Any]] = None):
+        docs = self.state_store.get_collection(self.name)
+        query = query or {}
+        return [
+            deepcopy(doc)
+            for doc in docs
+            if self._matches(doc, query)
+        ]
 
     def update_one(self, query: Dict[str, Any], update: Dict[str, Any]):
         docs = self.state_store.get_collection(self.name)
@@ -483,11 +497,14 @@ class DocstribeOrchestrator:
                 "AZURE_OPENAI_API_KEY (or OPENAI_API_KEY as fallback) must be configured to use the orchestrator"
             )
 
+        self.azure_api_key = azure_api_key
         self.openai_client = AzureOpenAI(
             api_key=azure_api_key,
             api_version=self.azure_api_version,
             azure_endpoint=self.azure_endpoint,
         )
+
+
 
         self.project_settings = {
             "project_id": os.getenv("DOCSTRIBE_PROJECT_ID", "local-docstribe"),
@@ -533,6 +550,38 @@ class DocstribeOrchestrator:
 
     def _azure_batch_url(self) -> str:
         return "/chat/completions"
+
+    def get_llm_azure_model(self) -> AzureChatOpenAI:
+        return AzureChatOpenAI(
+            azure_deployment=self.azure_deployment,
+            api_version=self.azure_api_version,
+            azure_endpoint=self.azure_endpoint,
+            api_key=self.azure_api_key,
+        )
+
+    def ip_admission_with_structured_output(self, payload: Dict[str, Any]):
+        system_prompt = self.prompt_manager.get("ipd_module_system_prompt", "")
+        user_prompt_template = self.prompt_manager.get("ipd_module_user_prompt", "")
+        if not system_prompt or not user_prompt_template:
+            raise ValueError("IPD module prompts are not configured")
+
+        payload_copy = deepcopy(payload)
+        payload_copy.pop("_id", None)
+        patient_details_str = json.dumps(payload_copy, default=str)
+
+        user_prompt = user_prompt_template.format(
+            patient_details=patient_details_str,
+            current_date=dt.datetime.now().strftime("%d-%m-%Y"),
+        )
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        model = self.get_llm_azure_model()
+        agent = model.with_structured_output(PatientCarePlan)
+        response = agent.invoke(messages)
+        resp_content = response.model_dump()
+        return json.loads(json.dumps(resp_content, default=str))
 
     # ------------------------------------------------------------------
     def _should_use_sequential(self, payload: Optional[Dict[str, Any]] = None) -> bool:
@@ -677,6 +726,9 @@ class DocstribeOrchestrator:
             "opd_batch_collection": getattr(agent_cfg, "OPD_BATCH_COLLECTION", "opd_batches"),
             "opd_initial_collection": getattr(agent_cfg, "OPD_INITIAL_COLLECTION", "opd_initial"),
             "pdcm_initial_collection": getattr(agent_cfg, "PDCM_INITIAL_COLLECTION", "pdcm_initial"),
+            "ip_recommendation_patient_collection": getattr(
+                agent_cfg, "IP_RECOMMENDATION_PATIENT_COLLECTION", "ip_recommendation_patient"
+            ),
         }
 
         collections: Dict[str, Any] = {}
@@ -1060,6 +1112,32 @@ class DocstribeOrchestrator:
         return {"responses": array_response}
 
     # ------------------------------------------------------------------
+    def handle_view_ip_advise_output(self, payload: Dict[str, Any]):
+        if request.method == "OPTIONS":
+            return self._options_ok()
+
+        patient_ids = payload.get("patient_ids", [])
+        responses: List[Dict[str, Any]] = []
+        collection = self.collections["ip_recommendation_patient_collection"]
+
+        for patient_id in patient_ids:
+            if not patient_id:
+                responses.append({"event_response": {}})
+                continue
+            doc = collection.find_one(
+                {"patient_details.patient_id": patient_id, "status": "completed"}
+            )
+            if not doc:
+                responses.append({"event_response": {}})
+                continue
+            event_response = deepcopy(doc.get("event_response") or {})
+            if isinstance(event_response, dict) and "request_id" not in event_response:
+                event_response["request_id"] = f"request_{patient_id}"
+            responses.append({"event_response": event_response})
+
+        return {"responses": responses}
+
+    # ------------------------------------------------------------------
     def handle_view_pdcm_output(self, payload: Dict[str, Any]):
         if request.method == "OPTIONS":  # rely on Flask request context
             return self._options_ok()
@@ -1225,6 +1303,26 @@ class DocstribeOrchestrator:
             "abnormalities_identified": visits_payload,
             "message": "please pass a valid prompt code",
         }
+
+    # ------------------------------------------------------------------
+    def handle_process_ip_advise_patient(self, payload: Dict[str, Any]):
+        if request.method == "OPTIONS":
+            return self._options_ok()
+
+        response_data = self.handle_process_opd_message(payload)
+        if not isinstance(response_data, dict):
+            return response_data
+
+        if "status" not in response_data:
+            return response_data
+
+        document = deepcopy(response_data)
+        document.pop("_id", None)
+        insert_result = self.collections["ip_recommendation_patient_collection"].insert_one(document)
+        response_data["ip_recommendation_patient_id"] = str(
+            getattr(insert_result, "inserted_id", "")
+        )
+        return response_data
 
     # ------------------------------------------------------------------
     def handle_process_pdcm_message(self, payload: Dict[str, Any]):
@@ -1421,6 +1519,104 @@ class DocstribeOrchestrator:
                 {"$set": {"status": "processing"}},
             )
         return {"status": "success"}
+
+    # ------------------------------------------------------------------
+    def handle_collect_ip_advise_pending_request(self, payload: Dict[str, Any]):
+        if request.method == "OPTIONS":
+            return self._options_ok()
+
+        collection = self.collections["ip_recommendation_patient_collection"]
+        limit = payload.get("limit")
+        max_count: Optional[int] = None
+        if limit is not None:
+            try:
+                max_count = int(limit)
+            except (TypeError, ValueError):
+                max_count = None
+        patient_ids = {pid for pid in payload.get("patient_ids", []) if pid}
+
+        pending_iter = collection.find({"status": "pending"})
+        if isinstance(pending_iter, list):
+            pending_docs = pending_iter
+        else:
+            pending_docs = list(pending_iter)
+
+        filtered_docs: List[Dict[str, Any]] = []
+        for doc in pending_docs:
+            patient_id = doc.get("patient_details", {}).get("patient_id")
+            if patient_ids and patient_id not in patient_ids:
+                continue
+            filtered_docs.append(doc)
+            if max_count is not None and len(filtered_docs) >= max_count:
+                break
+
+        responses: List[Dict[str, Any]] = []
+        failures: List[Dict[str, Any]] = []
+
+        for doc in filtered_docs:
+            doc_id = doc.get("_id")
+            patient_details = doc.get("patient_details", {})
+            patient_id = patient_details.get("patient_id")
+            processing_time = dt.datetime.utcnow().isoformat()
+            try:
+                collection.update_one(
+                    {"_id": doc_id},
+                    {"$set": {"status": "processing", "updated_at": processing_time}},
+                )
+            except Exception:
+                logger.exception("Unable to mark IP advise document as processing for patient %s", patient_id)
+                continue
+
+            try:
+                recommendation = self.ip_admission_with_structured_output(doc)
+                completed_time = dt.datetime.utcnow().isoformat()
+                collection.update_one(
+                    {"_id": doc_id},
+                    {
+                        "$set": {
+                            "status": "completed",
+                            "event_response": recommendation,
+                            "processed_at": completed_time,
+                            "updated_at": completed_time,
+                        }
+                    },
+                )
+                responses.append(
+                    {
+                        "patient_id": patient_id,
+                        "ip_recommendation_patient_id": str(doc_id),
+                        "recommendation": recommendation,
+                    }
+                )
+            except Exception as exc:
+                logger.exception("IP admission plan generation failed for patient %s", patient_id)
+                failed_time = dt.datetime.utcnow().isoformat()
+                collection.update_one(
+                    {"_id": doc_id},
+                    {
+                        "$set": {
+                            "status": "failed",
+                            "error": str(exc),
+                            "updated_at": failed_time,
+                        }
+                    },
+                )
+                failures.append(
+                    {
+                        "patient_id": patient_id,
+                        "ip_recommendation_patient_id": str(doc_id),
+                        "error": str(exc),
+                    }
+                )
+
+        status = "success" if not failures else ("partial_success" if responses else "failed")
+        return {
+            "status": status,
+            "processed": len(responses),
+            "failed": len(failures),
+            "responses": responses,
+            "failures": failures,
+        }
 
     # ------------------------------------------------------------------
     def opd_openai_prepare_batch(
@@ -1792,6 +1988,13 @@ def create_app(debug: bool = False) -> Flask:
         result = orchestrator.handle_view_opd_output(request.json)
         return jsonify(result)
 
+    @app.route("/view_ip_advise_output", methods=["POST", "OPTIONS"])
+    def view_ip_advise_output():
+        if request.method == "OPTIONS":
+            return orchestrator._options_ok()
+        result = orchestrator.handle_view_ip_advise_output(request.json or {})
+        return jsonify(result)
+
     @app.route("/view_pdcm_output", methods=["POST", "OPTIONS"])
     def view_pdcm_output():
         if request.method == "OPTIONS":
@@ -1811,6 +2014,13 @@ def create_app(debug: bool = False) -> Flask:
         if request.method == "OPTIONS":
             return orchestrator._options_ok()
         result = orchestrator.handle_process_opd_message(request.json)
+        return jsonify(result)
+
+    @app.route("/process_ip_advise_patient", methods=["POST", "OPTIONS"])
+    def process_ip_advise_patient():
+        if request.method == "OPTIONS":
+            return orchestrator._options_ok()
+        result = orchestrator.handle_process_ip_advise_patient(request.json)
         return jsonify(result)
 
     @app.route("/process_pdcm_message", methods=["POST", "OPTIONS"])
@@ -1846,6 +2056,13 @@ def create_app(debug: bool = False) -> Flask:
         if request.method == "OPTIONS":
             return orchestrator._options_ok()
         result = orchestrator.handle_collect_opd_pending_requests(request.json)
+        return jsonify(result)
+
+    @app.route("/collect_ip_advise_pending_request", methods=["POST", "OPTIONS"])
+    def collect_ip_advise_pending_request():
+        if request.method == "OPTIONS":
+            return orchestrator._options_ok()
+        result = orchestrator.handle_collect_ip_advise_pending_request(request.json or {})
         return jsonify(result)
 
     @app.route("/collect_pending_requests", methods=["POST", "OPTIONS"])
