@@ -1313,8 +1313,11 @@ class DocstribeOrchestrator:
         if not isinstance(response_data, dict):
             return response_data
 
-        if "status" not in response_data:
+        status_value = response_data.get("status")
+        if status_value is None:
             return response_data
+        if status_value == "completed":
+            response_data["status"] = "pending"
 
         document = deepcopy(response_data)
         document.pop("_id", None)

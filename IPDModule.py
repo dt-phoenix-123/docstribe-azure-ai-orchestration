@@ -58,15 +58,16 @@ class IPAdvisedMeta(BaseModel):
     Used by Care Coordinators & workflow engines.
     """
 
-    admission_type: Optional[str] = Field(
+    admission_type: Literal["surgical", "medical", "daycare"] = Field(
         None,
-        description="Admission category e.g. inpatient, outpatient, daycare_procedure"
+        description="Type of admission as per the defined in the clinical note. Medical means management of patient in IPD. So use that if no definitive procedure is found in the clinical note."
     )
     procedure_name: Optional[str] = Field(
         None, 
         description="Full medical procedure name"
     )
-    procedure_setting: Optional[str] = Field(
+
+    procedure_setting: Literal["inpatient","outpatient","daycare"] = Field(
         None,
         description="Where procedure is performed: inpatient / outpatient / daycare"
     )
