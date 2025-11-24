@@ -21,6 +21,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 from langchain_openai import AzureChatOpenAI
+from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from IPDModule import PatientCarePlan
 import requests
@@ -558,7 +559,14 @@ class DocstribeOrchestrator:
             azure_endpoint=self.azure_endpoint,
             api_key=self.azure_api_key,
         )
-
+    
+    def get_openai_model(self, name=None):
+        """Initialize and return the OpenAI model"""
+        model_name = name or self.openai_model
+        return ChatOpenAI(
+            model_name=model_name,
+            api_key=self.openai_api_key
+        )
     def ip_admission_with_structured_output(self, payload: Dict[str, Any]):
         system_prompt = self.prompt_manager.get("ipd_module_system_prompt", "")
         user_prompt_template = self.prompt_manager.get("ipd_module_user_prompt", "")
@@ -577,7 +585,8 @@ class DocstribeOrchestrator:
             SystemMessage(content=system_prompt),
             HumanMessage(content=user_prompt),
         ]
-        model = self.get_llm_azure_model()
+        # model = self.get_llm_azure_model()
+        model = self.get_openai_model("gpt-4.1")
         agent = model.with_structured_output(PatientCarePlan)
         response = agent.invoke(messages)
         resp_content = response.model_dump()
