@@ -5,7 +5,7 @@ from pydantic import BaseModel, Field
 class DeferredTimeline(BaseModel):
     """Details of deferred procedure timeline and emergency symptoms.
     Red flags should be string of not more than 2 words each"""
-    time: str
+    time: Literal["<15 days", "15-30 days", ">30 days"]
     red_flags: List[str]
 
 
@@ -54,7 +54,7 @@ class IPAdvisedMeta(BaseModel):
     """
     Metadata for IP / Daycare / OP-procedure advice.
     
-    Helps classify the nature of admission, care setting, and urgency.
+    Helps classify the nature of admission, care setting, cost of procedure and urgency.
     Used by Care Coordinators & workflow engines.
     """
 
@@ -64,7 +64,12 @@ class IPAdvisedMeta(BaseModel):
     )
     procedure_name: Optional[str] = Field(
         None, 
-        description="Full medical procedure name"
+        description="Full medical procedure name as per clinical note."
+    )
+
+    procedure_description: Optional[str] = Field(
+        None,
+        description="Brief description of the procedure as per clinical note so that any non medical user can understand. Don't make it more than one line."
     )
 
     procedure_setting: Literal["inpatient","outpatient","daycare"] = Field(
@@ -75,6 +80,17 @@ class IPAdvisedMeta(BaseModel):
         None,
         description="Elective / Emergency / Semi-elective"
     )
+
+    procedure_cost: Optional[float] = Field(
+        None,
+        description="Estimated cost of the procedure in INR as per standard pricing of tertiary care hospitals in India."
+    )
+
+    is_robotic: Literal["true","false"] = Field(
+        None,
+        description="Whether the procedure in question is robotic-assisted or not. If yes then mark it true else false."
+    )
+
 
 
 class PatientCarePlan(BaseModel):
