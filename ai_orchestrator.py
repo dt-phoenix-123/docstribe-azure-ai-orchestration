@@ -485,6 +485,8 @@ class DocstribeOrchestrator:
         )
         self.azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2025-04-01-preview")
         self.azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT", "Docstribe-o3")
+        self.openai_model = os.getenv("OPENAI_MODEL_NAME", "gpt-4.1")
+        self.openai_api_key = os.getenv("OPENAI_API_KEY", "")
 
         azure_api_key = os.getenv("AZURE_OPENAI_API_KEY")
         if not azure_api_key:
