@@ -17,6 +17,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code from project root
 COPY ai_orchestrator.py /app/
+COPY IPDModule.py /app/
 COPY docstribe_agent_config.py /app/
 COPY docstribe_summarizer.py /app/
 COPY opd_pydantic_validator.py /app/

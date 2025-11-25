@@ -102,7 +102,7 @@ echo "======================================"
 
 echo "Building & pushing $AI_ORCHESTRATOR_APP_SERVICE_NAME..."
 docker buildx build \
-    --platform linux/amd64,linux/arm64 \
+    --platform linux/amd64 \
     -t asia-south2-docker.pkg.dev/$project_id/$AI_ORCHESTRATION_REPO_NAME/$AI_ORCHESTRATOR_APP_SERVICE_NAME:latest \
     -f docker/ai-orchestration/Dockerfile-app . \
     --push
