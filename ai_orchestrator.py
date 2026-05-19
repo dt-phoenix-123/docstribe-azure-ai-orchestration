@@ -539,12 +539,14 @@ class DocstribeOrchestrator:
     # ------------------------------------------------------------------
     @staticmethod
     def _select_reasoning_llm(alias: str):
+        from docstribe_summarizer import _get_summarizer_llm
         mapping = {
+            "mistral": _get_summarizer_llm(),
             "groq": reasoning_llm,
             "openai": reasoning_llm_openai,
             "deepseek": reasoning_llm_v2,
         }
-        llm = mapping.get(alias.lower(), reasoning_llm)
+        llm = mapping.get(alias.lower(), _get_summarizer_llm())
         if llm is None:
             raise RuntimeError(
                 "Requested reasoning model is not available. Ensure the corresponding API key is configured."
@@ -1398,7 +1400,7 @@ class DocstribeOrchestrator:
     def handle_summarize_discharge(self, payload: Dict[str, Any]):
         medical_text = payload["medical_text"]
         discharge_date = payload.get("discharge_date", "")
-        model_alias = payload.get("model", "groq")
+        model_alias = payload.get("model", "mistral")
         llm = self._select_reasoning_llm(model_alias)
         return summarize_agent(medical_text, discharge_date, model=llm)
 

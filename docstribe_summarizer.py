@@ -18,8 +18,6 @@ from langchain_deepseek import ChatDeepSeek
 from langchain_groq import ChatGroq
 from langchain_mistralai.chat_models import ChatMistralAI
 from langchain_openai import ChatOpenAI
-from openai import OpenAI
-
 from docstribe_agent_config import (
     MASTER_PROMPTS,
     SUMMARIZE_FORMAT,
@@ -34,8 +32,8 @@ from docstribe_agent_config import (
     AZURE_OPENAI_ENDPOINT,
     AZURE_OPENAI_API_VERSION,
     AZURE_OPENAI_CHAT_DEPLOYMENT,
-    AZURE_GROK_BASE_URL,
-    AZURE_GROK_DEPLOYMENT,
+    SUMMARIZER_PROVIDER,
+    SUMMARIZER_MODEL,
 )
 
 
@@ -122,45 +120,29 @@ def _require_llm(llm: Optional[Any], name: str) -> Any:
     return llm
 
 
-def _grok_base_url() -> str:
-    return AZURE_GROK_BASE_URL.rstrip("/") + "/"
-
-
 @lru_cache(maxsize=1)
-def _get_grok_client() -> OpenAI:
-    if not AZURE_OPENAI_API_KEY:
-        raise RuntimeError("AZURE_OPENAI_API_KEY is not configured for summariser usage")
-    return OpenAI(base_url=_grok_base_url(), api_key=AZURE_OPENAI_API_KEY)
+def _get_summarizer_llm() -> Any:
+    """Return a LangChain chat model for summarization, driven by SUMMARIZER_PROVIDER."""
+    provider = SUMMARIZER_PROVIDER.lower()
+    if provider == "mistral":
+        return _build_chat_mistral(SUMMARIZER_MODEL, temperature=0.0)
+    # default: groq
+    return _build_chat_groq(SUMMARIZER_MODEL)
 
 
-def _grok_chat_completion(
+def _summarizer_chat_completion(
     prompt: str,
     *,
     system_prompt: Optional[str] = None,
     temperature: float = 0.0,
 ) -> str:
-    client = _get_grok_client()
-    messages: List[Dict[str, str]] = []
+    llm = _get_summarizer_llm()
+    messages: List[Any] = []
     if system_prompt:
-        messages.append({"role": "system", "content": system_prompt})
-    messages.append({"role": "user", "content": prompt})
-    completion = client.chat.completions.create(
-        model=AZURE_GROK_DEPLOYMENT,
-        messages=messages,
-        temperature=temperature,
-    )
-    message = completion.choices[0].message
-    content = getattr(message, "content", None)
-    if isinstance(content, list):
-        return "".join(
-            segment.get("text", "") if isinstance(segment, dict) else str(segment)
-            for segment in content
-        )
-    if hasattr(message, "content") and isinstance(message.content, str):
-        return message.content
-    if isinstance(message, dict):
-        return message.get("content", "")
-    return content or ""
+        messages.append(SystemMessage(content=system_prompt))
+    messages.append(HumanMessage(content=prompt))
+    resp = llm.invoke(messages)
+    return resp.content if isinstance(resp.content, str) else str(resp.content)
 
 
 # ---------------------------------------------------------------------------
@@ -387,7 +369,7 @@ def summarize_lab_data_agent(patient_data: Dict[str, Any]) -> Dict[str, Any]:
         clinical_note=clinical_note_blob,
     )
 
-    raw = _grok_chat_completion(formatted_prompt)
+    raw = _summarizer_chat_completion(formatted_prompt)
     raw = raw.split("</think>", 1)[-1].strip()
     start_idx = raw.find("{")
     end_idx = raw.rfind("}")
@@ -408,7 +390,7 @@ def summarize_agent(
         summarized_json_format=SUMMARIZE_FORMAT,
         discharge_date=discharge_date,
     )
-    raw = _grok_chat_completion(formatted_prompt)
+    raw = _summarizer_chat_completion(formatted_prompt)
     start_idx = raw.find("{")
     end_idx = raw.rfind("}")
     res = raw[start_idx : end_idx + 1]

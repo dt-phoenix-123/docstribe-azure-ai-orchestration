@@ -15,8 +15,9 @@ AZURE_OPENAI_API_KEY=...
 AZURE_OPENAI_ENDPOINT=https://<resource>.cognitiveservices.azure.com/
 AZURE_OPENAI_API_VERSION=2025-04-01-preview
 AZURE_OPENAI_DEPLOYMENT=Docstribe-o3
-AZURE_GROK_BASE_URL=https://<resource>.services.ai.azure.com/openai/v1/
-AZURE_GROK_DEPLOYMENT=Docstribe-grok-3
+MISTRAL_API_KEY=...
+SUMMARIZER_PROVIDER=mistral          # mistral (default) | groq
+SUMMARIZER_MODEL=mistral-large-latest
 DOCSTRIBE_MONGODB_URI=mongodb+srv://...
 LLM_ORCHESTRATOR_DB=max_azure_check
 ```
@@ -133,13 +134,14 @@ payload in the corresponding `<type>_workflow_log` collection.
 ## Summariser Endpoints
 
 ### `POST /summaries/discharge`
-Summarises discharge text using the Azure Grok deployment.
+Summarises discharge text using the configured summarizer (default: Mistral Large).
+Provider and model are controlled via `SUMMARIZER_PROVIDER` / `SUMMARIZER_MODEL` env vars.
 
 ```json
 {
   "medical_text": "<html or plain text>",
   "discharge_date": "12-Sep-2025",
-  "model": "groq"  // optional; default is groq
+  "model": "mistral"  // optional; mistral (default) | groq | openai | deepseek
 }
 ```
 

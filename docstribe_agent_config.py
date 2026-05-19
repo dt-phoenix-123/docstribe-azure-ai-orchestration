@@ -113,11 +113,11 @@ AZURE_OPENAI_CHAT_DEPLOYMENT = os.getenv(
     AZURE_OPENAI_DEPLOYMENT,
 )
 AZURE_OPENAI_BASE_URL = os.getenv("AZURE_OPENAI_BASE_URL", "")
-AZURE_GROK_BASE_URL = os.getenv(
-    "AZURE_GROK_BASE_URL",
-    "https://docstribeazureaifoundry.services.ai.azure.com/openai/v1/",
-)
-AZURE_GROK_DEPLOYMENT = os.getenv("AZURE_GROK_DEPLOYMENT", "Docstribe-grok-3")
+
+# Summarizer toggle — SUMMARIZER_PROVIDER: mistral (default) | groq
+# SUMMARIZER_MODEL: any model name on the chosen provider.
+SUMMARIZER_PROVIDER = os.getenv("SUMMARIZER_PROVIDER", "mistral")
+SUMMARIZER_MODEL = os.getenv("SUMMARIZER_MODEL", "mistral-large-latest")
 
 SIMPLIFICATION_URL = os.getenv(
     "SIMPLIFICATION_URL",
@@ -168,8 +168,8 @@ __all__ = [
     "AZURE_OPENAI_DEPLOYMENT",
     "AZURE_OPENAI_CHAT_DEPLOYMENT",
     "AZURE_OPENAI_BASE_URL",
-    "AZURE_GROK_BASE_URL",
-    "AZURE_GROK_DEPLOYMENT",
+    "SUMMARIZER_PROVIDER",
+    "SUMMARIZER_MODEL",
     "SIMPLIFICATION_URL",
     "PROJECT_ID",
     "IPD_SUBSCRIPTION_ID",
